@@ -39,6 +39,7 @@ help for more information on saving cropping shapes.
 
 import logging
 import math
+from telnetlib import EL
 
 import centrosome.filter
 import matplotlib.axes
@@ -57,7 +58,8 @@ from cellprofiler_core.setting.subscriber import ImageSubscriber
 from cellprofiler_core.setting.subscriber import LabelSubscriber
 from cellprofiler_core.setting.text import CropImageName
 from cellprofiler_core.setting.text import Integer
-from cellprofiler_core.utilities.image import crop_image
+from cellprofiler_library.functions.image_processing import apply_ellipse_cropping, apply_rectangle_cropping, crop_image, remove_rows_and_columns
+from cellprofiler_library.opts.crop import RemovalMethod
 
 LOGGER = logging.getLogger(__name__)
 
@@ -400,7 +402,7 @@ objects:
             workspace.measurements.get_current_image_measurement("Group_Index") == 1
         )
         image_set_list = workspace.image_set_list
-        d = self.get_dictionary(image_set_list)
+        cache_dict = self.get_dictionary(image_set_list)
         orig_image = workspace.image_set.get_image(self.image_name.value)
         recalculate_flag = (
             self.shape not in (SH_ELLIPSE, SH_RECTANGLE)
@@ -410,12 +412,12 @@ objects:
         )
         save_flag = self.individual_or_once == IO_FIRST and first_image_set
         if not recalculate_flag:
-            if d[D_FIRST_CROPPING].shape != orig_image.pixel_data.shape[:2]:
+            if cache_dict[D_FIRST_CROPPING].shape != orig_image.pixel_data.shape[:2]:
                 recalculate_flag = True
                 LOGGER.warning(
                     """Image, "%s", size changed from %s to %s during cycle %d, recalculating""",
                     self.image_name.value,
-                    str(d[D_FIRST_CROPPING].shape),
+                    str(cache_dict[D_FIRST_CROPPING].shape),
                     str(orig_image.pixel_data.shape[:2]),
                     workspace.image_set.image_number,
                 )
@@ -423,8 +425,8 @@ objects:
         cropping = None
         masking_objects = None
         if not recalculate_flag:
-            cropping = d[D_FIRST_CROPPING]
-            mask = d[D_FIRST_CROPPING_MASK]
+            cropping = cache_dict[D_FIRST_CROPPING]
+            mask = cache_dict[D_FIRST_CROPPING_MASK]
         elif self.shape == SH_CROPPING:
             cropping_image = workspace.image_set.get_image(
                 self.cropping_mask_source.value
@@ -442,39 +444,36 @@ objects:
         elif self.crop_method == CM_MOUSE:
             cropping = self.ui_crop(workspace, orig_image)
         elif self.shape == SH_ELLIPSE:
-            cropping = self.get_ellipse_cropping(workspace, orig_image)
-        elif self.shape == SH_RECTANGLE:
-            cropping = self.get_rectangle_cropping(workspace, orig_image)
-        if self.remove_rows_and_columns == RM_NO:
-            cropped_pixel_data = orig_image.pixel_data.copy()
-            if cropped_pixel_data.ndim == 3:
-                cropped_pixel_data[~cropping, :] = 0
-            else:
-                cropped_pixel_data[numpy.logical_not(cropping)] = 0
-            if mask is None:
-                mask = cropping
-            if orig_image.has_mask:
-                image_mask = mask & orig_image.mask
-            else:
-                image_mask = mask
-        else:
-            internal_cropping = self.remove_rows_and_columns == RM_ALL
-            cropped_pixel_data = crop_image(
-                orig_image.pixel_data, cropping, internal_cropping
-            )
-            if mask is None:
-                mask = crop_image(cropping, cropping, internal_cropping)
-            if orig_image.has_mask:
-                image_mask = (
-                    crop_image(orig_image.mask, cropping, internal_cropping) & mask
+            cache_dict[SH_ELLIPSE] = {
+                EL_XCENTER: self.ellipse_center.x,   
+                EL_YCENTER: self.ellipse_center.y,
+                EL_XRADIUS: self.ellipse_x_radius.value,
+                EL_YRADIUS: self.ellipse_y_radius.value,
+            }
+        
+            cropping = apply_ellipse_cropping(
+                orig_image.pixel_data, 
+                (self.ellipse_center.x, self.ellipse_center.y), 
+                (self.ellipse_x_radius.value, self.ellipse_y_radius.value)
                 )
-            else:
-                image_mask = mask
 
-            if cropped_pixel_data.ndim == 3:
-                cropped_pixel_data[~mask, :] = 0
-            else:
-                cropped_pixel_data[~mask] = 0
+
+        elif self.shape == SH_RECTANGLE:
+            h_min = self.horizontal_limits.min if not self.horizontal_limits.unbounded_min else None
+            h_max = self.horizontal_limits.max if not self.horizontal_limits.unbounded_max else None
+            v_min = self.vertical_limits.min if not self.vertical_limits.unbounded_min else None
+            v_max = self.vertical_limits.max if not self.vertical_limits.unbounded_max else None
+
+            cropping = apply_rectangle_cropping(orig_image.pixel_data, (h_min, h_max), (v_min, v_max), validate_boundaries=True)
+        else:
+            raise NotImplementedError(f"Cropping shape {self.shape} or crop method {self.crop_method} not supported.")
+        
+        assert(cropping is not None)
+        assert(cropping.dtype == bool)
+        
+        cropped_pixel_data, mask, image_mask = remove_rows_and_columns(self.remove_rows_and_columns.value, orig_image.pixel_data, cropping, mask, orig_image.mask)
+            
+
         if self.shape == SH_OBJECTS:
             # Special handling for objects - masked objects instead of
             # mask and crop mask
@@ -501,8 +500,8 @@ objects:
             )
 
         if save_flag:
-            d[D_FIRST_CROPPING_MASK] = mask
-            d[D_FIRST_CROPPING] = cropping
+            cache_dict[D_FIRST_CROPPING_MASK] = mask
+            cache_dict[D_FIRST_CROPPING] = cropping
         #
         # Save the image / cropping / mask
         #
@@ -547,9 +546,13 @@ objects:
                 self, d.get(self.shape.value, None), orig_image.pixel_data
             )
         if self.shape == SH_ELLIPSE:
-            return self.apply_ellipse_cropping(workspace, orig_image)
+            center = d[SH_ELLIPSE][EL_XCENTER], d[SH_ELLIPSE][EL_YCENTER]
+            radius = d[SH_ELLIPSE][EL_XRADIUS], d[SH_ELLIPSE][EL_YRADIUS]   
+            return apply_ellipse_cropping(orig_image.pixel_data, center, radius)
         else:
-            return self.apply_rectangle_cropping(workspace, orig_image)
+            horizontal_limits = int(numpy.round(d[SH_RECTANGLE][RE_LEFT])), int(numpy.round(d[SH_RECTANGLE][RE_RIGHT]))
+            vertical_limits = int(numpy.round(d[SH_RECTANGLE][RE_TOP])), int(numpy.round(d[SH_RECTANGLE][RE_BOTTOM]))
+            return apply_rectangle_cropping(orig_image.pixel_data, horizontal_limits, vertical_limits)
 
     def handle_interaction(self, current_shape, orig_image):
         from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
@@ -858,76 +861,21 @@ objects:
                 EL_YRADIUS: shape.height / 2,
             }
 
-    def get_ellipse_cropping(self, workspace, orig_image):
+    def get_ellipse_cropping(self, workspace, orig_image, ellipse_center, ellipse_radius, d):
         """Crop into an ellipse using user-specified coordinates"""
-        x_center = self.ellipse_center.x
-        y_center = self.ellipse_center.y
-        x_radius = self.ellipse_x_radius.value
-        y_radius = self.ellipse_y_radius.value
-        d = self.get_dictionary(workspace.image_set_list)
+        x_center, y_center = ellipse_center
+        x_radius, y_radius = ellipse_radius
         d[SH_ELLIPSE] = {
             EL_XCENTER: x_center,
             EL_YCENTER: y_center,
             EL_XRADIUS: x_radius,
             EL_YRADIUS: y_radius,
         }
-        return self.apply_ellipse_cropping(workspace, orig_image)
+        
+        return apply_ellipse_cropping(orig_image.pixel_data, ellipse_center, ellipse_radius)
 
-    def apply_ellipse_cropping(self, workspace, orig_image):
-        d = self.get_dictionary(workspace.image_set_list)
-        ellipse = d[SH_ELLIPSE]
-        x_center, y_center, x_radius, y_radius = [
-            ellipse[x] for x in (EL_XCENTER, EL_YCENTER, EL_XRADIUS, EL_YRADIUS)
-        ]
-        pixel_data = orig_image.pixel_data
-        x_max = pixel_data.shape[1]
-        y_max = pixel_data.shape[0]
-        if x_radius > y_radius:
-            dist_x = math.sqrt(x_radius ** 2 - y_radius ** 2)
-            dist_y = 0
-            major_radius = x_radius
-        else:
-            dist_x = 0
-            dist_y = math.sqrt(y_radius ** 2 - x_radius ** 2)
-            major_radius = y_radius
 
-        focus_1_x, focus_1_y = (x_center - dist_x, y_center - dist_y)
-        focus_2_x, focus_2_y = (x_center + dist_x, y_center + dist_y)
-        y, x = numpy.mgrid[0:y_max, 0:x_max]
-        d1 = numpy.sqrt((x - focus_1_x) ** 2 + (y - focus_1_y) ** 2)
-        d2 = numpy.sqrt((x - focus_2_x) ** 2 + (y - focus_2_y) ** 2)
-        cropping = d1 + d2 <= major_radius * 2
-        return cropping
 
-    def get_rectangle_cropping(self, workspace, orig_image):
-        """Crop into a rectangle using user-specified coordinates"""
-        cropping = numpy.ones(orig_image.pixel_data.shape[:2], bool)
-        if not self.horizontal_limits.unbounded_min:
-            cropping[:, : self.horizontal_limits.min] = False
-        if not self.horizontal_limits.unbounded_max:
-            cropping[:, self.horizontal_limits.max :] = False
-        if not self.vertical_limits.unbounded_min:
-            cropping[: self.vertical_limits.min, :] = False
-        if not self.vertical_limits.unbounded_max:
-            cropping[self.vertical_limits.max :, :] = False
-        return cropping
-
-    def apply_rectangle_cropping(self, workspace, orig_image):
-        cropping = numpy.ones(orig_image.pixel_data.shape[:2], bool)
-        d = self.get_dictionary(workspace.image_set_list)
-        r = d[SH_RECTANGLE]
-        left, top, right, bottom = [
-            int(numpy.round(r[x])) for x in (RE_LEFT, RE_TOP, RE_RIGHT, RE_BOTTOM)
-        ]
-        if left > 0:
-            cropping[:, :left] = False
-        if right < cropping.shape[1]:
-            cropping[:, right:] = False
-        if top > 0:
-            cropping[:top, :] = False
-        if bottom < cropping.shape[0]:
-            cropping[bottom:, :] = False
-        return cropping
 
     def upgrade_settings(self, setting_values, variable_revision_number, module_name):
         if variable_revision_number == 1:
