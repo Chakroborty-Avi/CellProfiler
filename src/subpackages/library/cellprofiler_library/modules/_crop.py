@@ -1,9 +1,9 @@
-from typing import Annotated, Optional, Tuple
+from typing import Annotated, Optional, Tuple, List
 from pydantic import Field, validate_call, ConfigDict
 from ..types import Image2D, Image2DMask
 import numpy
 from cellprofiler_library.functions.image_processing import get_cropped_mask, get_cropped_image_mask, get_cropped_image_pixels
-from ..opts.crop import RemovalMethod
+from ..opts.crop import RemovalMethod, Measurement
 
 @validate_call(config=ConfigDict(arbitrary_types_allowed=True))
 def remove_rows_and_columns(
@@ -29,3 +29,14 @@ def remove_rows_and_columns(
 
     return cropped_pixel_data, mask, image_mask
 
+def measure_area_retained_after_cropping(cropping: Image2DMask) -> int:
+    return numpy.sum(cropping)
+
+def measure_original_image_area(orig_image_pixels: Image2D) -> int:
+    return numpy.product(orig_image_pixels.shape)
+
+def get_measurements(cropping: Image2DMask, orig_image_pixels:Image2D) -> List[Tuple[str, str, int]]:
+    orig_image_area = measure_original_image_area(orig_image_pixels)
+    area_retained_after_cropping = measure_area_retained_after_cropping(cropping)
+    return [(str(Measurement.AREA_RETAINED % "OriginalImage"), str(orig_image_area), orig_image_area),
+            (str(Measurement.AREA_RETAINED % "CroppedImage"), str(area_retained_after_cropping), area_retained_after_cropping)]
