@@ -58,7 +58,8 @@ from cellprofiler_core.setting.subscriber import ImageSubscriber
 from cellprofiler_core.setting.subscriber import LabelSubscriber
 from cellprofiler_core.setting.text import CropImageName
 from cellprofiler_core.setting.text import Integer
-from cellprofiler_library.functions.image_processing import apply_ellipse_cropping, apply_rectangle_cropping, crop_image, remove_rows_and_columns
+from cellprofiler_library.functions.image_processing import apply_ellipse_cropping, apply_rectangle_cropping
+from cellprofiler_library.modules._crop import remove_rows_and_columns
 from cellprofiler_library.opts.crop import RemovalMethod
 
 LOGGER = logging.getLogger(__name__)

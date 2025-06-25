@@ -728,7 +728,7 @@ def get_final_cropping_keep_rows_and_columns(
         cropping: Image2DMask,
         mask: Optional[Image2DMask],
         orig_image_mask: Optional[Image2DMask] = None,
-) -> Tuple[Image2D, Image2DMask, Image2DMask]:
+) -> Tuple[Image2DMask, Image2DMask]:
     #
     # Check for previous cropping's mask. If it doesn't exist, set it to the current cropping
     #
@@ -741,18 +741,18 @@ def get_final_cropping_keep_rows_and_columns(
     #
     if orig_image_mask is not None:
         # Image mask is the region of interest indicator for the final image object.
-        image_mask = orig_image_mask
+        image_mask = orig_image_mask & mask
     else:
         image_mask = mask
 
-    return cropping, mask, image_mask
+    return mask, image_mask
 
 def get_final_cropping_remove_rows_and_columns(
         cropping: Image2DMask,
         mask: Optional[Image2DMask],
         orig_image_mask: Optional[Image2DMask] = None,
         crop_internal: bool = False,
-) -> Tuple[Image2D, Image2DMask, Image2DMask]:
+) -> Tuple[Image2DMask, Image2DMask]:
     #
     # Check for previous cropping's mask. If it doesn't exist, set it to the region of interest specified
     # by the cropping. The final mask output size could be smaller as the crop_image function removes
@@ -768,10 +768,10 @@ def get_final_cropping_remove_rows_and_columns(
     #
     if orig_image_mask is not None:
         # Image mask is the region of interest indicator for the final image object.
-        image_mask = crop_image(orig_image_mask, cropping, crop_internal)
+        image_mask = crop_image(orig_image_mask, cropping, crop_internal) & mask
     else:
         image_mask = mask
-    return mask, mask, image_mask
+    return mask, image_mask
 
 
 def apply_crop_keep_rows_and_columns(

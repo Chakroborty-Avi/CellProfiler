@@ -16,15 +16,15 @@ def remove_rows_and_columns(
     #
     # Get the final cropping
     #
-    final_cropping, mask, image_mask = get_final_cropping(cropping, mask, orig_image_mask, removal_method)
+    mask, image_mask = get_final_cropping(cropping, mask, orig_image_mask, removal_method)
 
     #
     # apply final cropping based on the removal method
     #
     if removal_method == RemovalMethod.NO:
-        cropped_pixel_data = apply_crop_keep_rows_and_columns(orig_image_pixels, final_cropping)
+        cropped_pixel_data = apply_crop_keep_rows_and_columns(orig_image_pixels, cropping)
     elif removal_method in (RemovalMethod.EDGES, RemovalMethod.ALL):
-        cropped_pixel_data = apply_crop_remove_rows_and_columns(orig_image_pixels, final_cropping, mask, removal_method)
+        cropped_pixel_data = apply_crop_remove_rows_and_columns(orig_image_pixels, cropping, mask, removal_method)
     else:
         raise NotImplementedError(f"Unimplemented removal method: {removal_method}")
 
@@ -35,19 +35,19 @@ def get_final_cropping(
         mask:               Annotated[Optional[Image2DMask], Field(description="Previous cropping's mask")],
         orig_image_mask:    Annotated[Optional[Image2DMask], Field(description="Mask that may have been set on the original image")] = None,
         removal_method:     Annotated[RemovalMethod, Field(description="Removal method")] = RemovalMethod.NO,
-) -> Tuple[Image2D, Image2DMask, Image2DMask]:
+) -> Tuple[Image2DMask, Image2DMask]:
     image_mask = None
     if removal_method == RemovalMethod.NO:
-        cropping, mask, image_mask = get_final_cropping_keep_rows_and_columns(
+        mask, image_mask = get_final_cropping_keep_rows_and_columns(
             cropping, mask, orig_image_mask
         )
     elif removal_method in (RemovalMethod.EDGES, RemovalMethod.ALL):
         crop_internal = removal_method == RemovalMethod.ALL
-        cropping, mask, image_mask = get_final_cropping_remove_rows_and_columns(
+        mask, image_mask = get_final_cropping_remove_rows_and_columns(
             cropping, mask, orig_image_mask, crop_internal
         )
     else:
         raise NotImplementedError(f"Unimplemented removal method: {removal_method}")
     
-    return cropping, mask, image_mask
+    return mask, image_mask
 
