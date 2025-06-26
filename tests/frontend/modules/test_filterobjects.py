@@ -339,7 +339,7 @@ def test_filter():
     assert numpy.all(labels.segmented == expected)
 
 
-def test_filter():
+def test_filter_min():
     """Filter objects by min limits"""
     n = 40
     labels = numpy.zeros((10, n * 10), int)
@@ -369,7 +369,7 @@ def test_filter():
     assert numpy.all(labels.segmented == expected)
 
 
-def test_filter():
+def test_filter_max():
     """Filter objects by maximum limits"""
     n = 40
     labels = numpy.zeros((10, n * 10), int)
@@ -513,6 +513,116 @@ def test_renumber_other_object_numbers_reversed_does_not_relate():
     alternates = workspace.object_set.get_objects("my_additional_result")
     assert numpy.all(labels.segmented == expected)
     assert numpy.any(alternates.segmented != expected_alternates)
+
+
+def test_additional_objects_filter_correctly():
+    # ref: issues/4509
+    parent_str = """
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00000000333000000000
+        00444440333000000000
+        00444440333000000000
+        00444440333000000000
+        00444440000000000000
+        00000000000000000000
+    """
+
+    child_str = """
+        00000000000000000000
+        01111100002222033330
+        01111100002222033330
+        01111100002222033330
+        01111100002222033330
+        01111100000000000000
+        00000000444440000000
+        05555500444440000000
+        05555500444440000000
+        05555500444440000000
+        05555500444440066660
+        05555500444440066660
+        00000000000000066660
+        00000000000000000000
+    """
+
+    expected_str = """
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00111110000022222000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+    """
+
+    expected_alternates_str = """
+        00000000000000000000
+        01111100002222033330
+        01111100002222033330
+        01111100002222033330
+        01111100002222033330
+        01111100000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+        00000000000000000000
+    """
+
+    def str_to_image(inp_str):
+        inp_str = inp_str.replace(" ", "")
+        inp_str_rows = inp_str.split("\n")
+        inp_str_rows = [i for i in inp_str_rows if i] # remove empty lines
+        return numpy.array([list(i) for i in inp_str_rows], int)
+    parent = str_to_image(parent_str)
+    child = str_to_image(child_str)
+    expected = str_to_image(expected_str)
+    expected_alternates = str_to_image(expected_alternates_str)
+
+    workspace, module = make_workspace(
+        {INPUT_OBJECTS: parent, "my_alternates": child}
+    )
+    module.x_name.value = INPUT_OBJECTS
+    module.y_name.value = OUTPUT_OBJECTS
+    # module.measurements[0].measurement.value = TEST_FTR
+    # module.filter_choice.value = cellprofiler.modules.filterobjects.FI_MAXIMAL
+    # m = workspace.measurements
+    # m.add_measurement(INPUT_OBJECTS, TEST_FTR, numpy.array([1, 2, 3, 4]))
+    # module.run(workspace)
+    # labels = workspace.object_set.get_objects(OUTPUT_OBJECTS)
+    # assert numpy.all(labels.segmented == expected)
+    module.filter_choice.value = cellprofiler.modules.filterobjects.FI_LIMITS
+    module.measurements[0].measurement.value = "Number_Object_Number"
+    module.measurements[0].min_limit.value = 0.5
+    module.measurements[0].max_limit.value = 2.5
+    module.add_additional_object()
+    module.additional_objects[0].object_name.value = "my_alternates"
+    module.additional_objects[0].target_name.value = "my_additional_result"
+    m = workspace.measurements
+    m.add_measurement(INPUT_OBJECTS, "Number_Object_Number", [1, 2, 3, 4, 5])
+    module.run(workspace)
+    labels = workspace.object_set.get_objects(OUTPUT_OBJECTS)
+    alternates = workspace.object_set.get_objects("my_additional_result")
+    assert numpy.all(labels.segmented == expected)
+    assert numpy.all(alternates.segmented == expected_alternates)
+
+
 
 
 def test_load_v3():
