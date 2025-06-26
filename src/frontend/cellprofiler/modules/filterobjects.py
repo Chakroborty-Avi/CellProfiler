@@ -141,7 +141,7 @@ PO_ALL = [PO_BOTH, PO_PARENT_WITH_MOST_OVERLAP]
 class FilterObjects(ObjectProcessing):
     module_name = "FilterObjects"
 
-    variable_revision_number = 10
+    variable_revision_number = 11
 
     def __init__(self):
         self.rules = Rules()
@@ -519,6 +519,17 @@ value will be retained.""".format(
         )
 
         group.append(
+            "keep_unassociated_objects",
+            Binary(
+                "Keep unassociated objects?",
+                False,
+                doc="""\
+                Select *{YES}* to keep objects that do not have a parent object. Select *{NO}* to only keep child objects of the objects that get selected by the filter.
+                """
+            )
+        )
+
+        group.append(
             "remover",
             RemoveSettingButton(
                 "", "Remove this additional object", self.additional_objects, group
@@ -565,7 +576,7 @@ value will be retained.""".format(
             settings += x.pipeline_settings()
 
         for x in self.additional_objects:
-            settings += [x.object_name, x.target_name]
+            settings += [x.object_name, x.target_name, x.keep_unassociated_objects]
 
         settings += [self.allow_fuzzy]
 
@@ -1212,7 +1223,7 @@ measurement is not available at this stage of the pipeline. Consider adding modu
         return super(FilterObjects, self).get_measurement_columns(
             pipeline,
             additional_objects=[
-                (x.object_name.value, x.target_name.value)
+                (x.object_name.value, x.target_name.valu, x.keep_unassociated_objects.value)
                 for x in self.additional_objects
             ] + [(self.x_name.value,self.removed_objects_name.value)] if self.keep_removed_objects.value else [],
         )
@@ -1417,6 +1428,62 @@ measurement is not available at this stage of the pipeline. Consider adding modu
         if variable_revision_number == 9:
             setting_values.append(False)
             variable_revision_number = 10
+
+        if variable_revision_number == 10:
+            (
+                x_name,
+                y_name,
+                mode,
+                filter_choice,
+                enclosing_object_name,
+                rules_directory,
+                rules_file_name,
+                rules_class,
+                measurement_count,
+                additional_object_count,
+                per_object_assignment,
+                keep_removed_objects,
+                removed_objects_name,
+            ) = setting_values[:13]
+            additional_object_count = int(additional_object_count)
+            n_measurement_settings = int(measurement_count) * 5
+
+            additional_object_settings_index_offset = 13 + n_measurement_settings
+
+            additional_object_settings = setting_values[additional_object_settings_index_offset: additional_object_settings_index_offset + (additional_object_count*2) ] 
+            additional_object_names = additional_object_settings[::2]
+            additional_target_names = additional_object_settings[1::2]
+
+            (allow_fuzzy, ) = setting_values[additional_object_settings_index_offset + ((additional_object_count)*2):]
+            new_additional_object_settings = sum(
+                [
+                    [object_name, target_name, "No"]
+                    for object_name, target_name in zip(
+                        additional_object_names, additional_target_names
+                    )
+                ],
+                []
+            )
+            setting_values = ([
+                x_name,
+                y_name,
+                mode,
+                filter_choice,
+                enclosing_object_name,
+                rules_directory,
+                rules_file_name,
+                rules_class,
+                str(measurement_count),
+                str(additional_object_count),
+                per_object_assignment,
+                keep_removed_objects,
+                removed_objects_name,
+            ]
+            + setting_values[13:13+n_measurement_settings]
+            + new_additional_object_settings
+            + [allow_fuzzy]
+            )
+            variable_revision_number = 11
 
         return setting_values, variable_revision_number
 
