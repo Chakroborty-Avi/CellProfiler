@@ -753,19 +753,54 @@ measurement is not available at this stage of the pipeline. Consider adding modu
         #
         # Loop over both the primary and additional objects
         #
-        object_list = [(self.x_name.value, self.y_name.value)] + [
-            (x.object_name.value, x.target_name.value) for x in self.additional_objects
+        object_list = [(self.x_name.value, self.y_name.value, None)] + [
+            (x.object_name.value, x.target_name.value, x.keep_unassociated_objects.value) for x in self.additional_objects
         ]
         m = workspace.measurements
         first_set = True
-        for src_name, target_name in object_list:
+        for src_name, target_name, keep_unassociated_objects in object_list:
             src_objects = workspace.get_objects(src_name)
             target_labels = src_objects.segmented.copy()
+
+            # Parent relation is used if it exists (use RelateObjects module)
+            parent_relation_exists = len([i for i in m.get_measurement_columns() if i[0] == src_name and i[1] == f'Parent_{self.x_name.value}']) > 0
             #
             # Reindex the labels of the old source image
             #
-            target_labels[target_labels > max_label] = 0
-            target_labels = label_indexes[target_labels]
+            if first_set or not parent_relation_exists:
+                target_labels[target_labels > max_label] = 0
+                target_labels = label_indexes[target_labels]
+            else:
+                #
+                # Get parent object from measurements
+                #
+                parent_objects = m.get_measurement(src_name, f"Parent_{self.x_name.value}")
+                
+                # Initialize target labels to keep all child objects
+                target_label_numbers = numpy.arange(1, target_labels.max() + 1)
+                
+                orphan_children = target_label_numbers[parent_objects == 0]
+
+                # label == 0 indicates parent object has to be removed
+                objects_to_remove = numpy.arange(max_label+1)[label_indexes == 0][1:] # ignore the first zero as it is the background
+                
+                # object is removed by setting its new label to zero
+                target_label_numbers = target_label_numbers*~numpy.isin(parent_objects, objects_to_remove)
+
+                new_child_object_count = sum(target_label_numbers != 0)
+
+                # orphan children get new labels. Labels are always continuous and start at 1
+                target_label_numbers[target_label_numbers != 0] = numpy.arange(1, new_child_object_count + 1)
+                target_label_numbers = numpy.array([0, *target_label_numbers])
+                
+                # Overwrite orphan children new labels with 0 to remove unassociated objects
+                if not keep_unassociated_objects:
+                    target_label_numbers[orphan_children] = 0
+
+                # Numpy fancy indexing to relabel
+                target_labels = target_label_numbers[target_labels]
+
+            
             #
             # Make a new set of objects - retain the old set's unedited
             # segmentation for the new and generally try to copy stuff
@@ -791,7 +826,7 @@ measurement is not available at this stage of the pipeline. Consider adding modu
                 workspace.display_data.src_objects_segmented = src_objects.segmented
                 workspace.display_data.target_objects_segmented = target_objects.segmented
                 workspace.display_data.dimensions = src_objects.dimensions
-                first_set = False
+            first_set = False
 
         if self.keep_removed_objects.value:
             # Isolate objects removed by the filter
