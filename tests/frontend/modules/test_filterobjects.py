@@ -1,7 +1,9 @@
+from ast import mod
 import contextlib
 import io
 import os
 import pickle
+import re
 import tempfile
 
 import numpy
@@ -29,10 +31,19 @@ TEST_FTR = "my_measurement"
 MISSPELLED_FTR = "m_measurement"
 
 
-def make_workspace(object_dict={}, image_dict={}):
+def make_workspace(object_dict={}, image_dict={}, custom_pipeline=None):
     """Make a workspace for testing FilterByObjectMeasurement"""
     module = cellprofiler.modules.filterobjects.FilterByObjectMeasurement()
-    pipeline = cellprofiler_core.pipeline.Pipeline()
+    if custom_pipeline:
+        pipeline = custom_pipeline 
+        module.set_module_num(2)
+    else:
+        pipeline = cellprofiler_core.pipeline.Pipeline()
+        module.set_module_num(1)
+    pipeline.add_module(module)
+    # get number of modules in pipeline and set the next module number
+    module_num = len(pipeline.modules())
+    module.set_module_num(module_num + 1)
     object_set = cellprofiler_core.object.ObjectSet()
     image_set_list = cellprofiler_core.image.ImageSetList()
     image_set = image_set_list.get_image_set(0)
@@ -514,9 +525,8 @@ def test_renumber_other_object_numbers_reversed_does_not_relate():
     assert numpy.all(labels.segmented == expected)
     assert numpy.any(alternates.segmented != expected_alternates)
 
-
-def test_additional_objects_filter_correctly():
-    # ref: issues/4509
+@pytest.fixture(scope="function")
+def get_images_for_issue_4509():
     parent_str = """
         00000000000000000000
         00000000000000000000
@@ -594,19 +604,33 @@ def test_additional_objects_filter_correctly():
     child = str_to_image(child_str)
     expected = str_to_image(expected_str)
     expected_alternates = str_to_image(expected_alternates_str)
+    return parent, child, expected, expected_alternates
 
+
+def test_additional_objects_filter_correctly(get_images_for_issue_4509):
+    # ref: issues/4509
+    parent, child, expected, expected_alternates = get_images_for_issue_4509
+    parent = parent.copy() # needed to avoid mutating the fixture
+    child = child.copy()
+    expected = expected.copy()
+    expected_alternates = expected_alternates.copy()
+
+    custom_pipeline = cellprofiler_core.pipeline.Pipeline()
+    relate_objects_module = cellprofiler.modules.relateobjects.Relate()
+    relate_objects_module.x_name.value = INPUT_OBJECTS
+    relate_objects_module.y_name.value = "my_alternates"
+    relate_objects_module.find_parent_child_distances.value = (
+        cellprofiler.modules.relateobjects.D_NONE
+    )
+    relate_objects_module.wants_per_parent_means.value = False
+    relate_objects_module.set_module_num(1)
+    custom_pipeline.add_module(relate_objects_module)
     workspace, module = make_workspace(
-        {INPUT_OBJECTS: parent, "my_alternates": child}
+        {INPUT_OBJECTS: parent, "my_alternates": child},
+        custom_pipeline=custom_pipeline
     )
     module.x_name.value = INPUT_OBJECTS
     module.y_name.value = OUTPUT_OBJECTS
-    # module.measurements[0].measurement.value = TEST_FTR
-    # module.filter_choice.value = cellprofiler.modules.filterobjects.FI_MAXIMAL
-    # m = workspace.measurements
-    # m.add_measurement(INPUT_OBJECTS, TEST_FTR, numpy.array([1, 2, 3, 4]))
-    # module.run(workspace)
-    # labels = workspace.object_set.get_objects(OUTPUT_OBJECTS)
-    # assert numpy.all(labels.segmented == expected)
     module.filter_choice.value = cellprofiler.modules.filterobjects.FI_LIMITS
     module.measurements[0].measurement.value = "Number_Object_Number"
     module.measurements[0].min_limit.value = 0.5
@@ -614,8 +638,57 @@ def test_additional_objects_filter_correctly():
     module.add_additional_object()
     module.additional_objects[0].object_name.value = "my_alternates"
     module.additional_objects[0].target_name.value = "my_additional_result"
+    module.additional_objects[0].keep_unassociated_objects.value = False
     m = workspace.measurements
     m.add_measurement(INPUT_OBJECTS, "Number_Object_Number", [1, 2, 3, 4, 5])
+    relate_objects_module.run(workspace)
+    module.run(workspace)
+    labels = workspace.object_set.get_objects(OUTPUT_OBJECTS)
+    alternates = workspace.object_set.get_objects("my_additional_result")
+    assert numpy.all(labels.segmented == expected)
+    assert numpy.all(alternates.segmented == expected_alternates)
+
+
+
+def test_additional_objects_filter_correctly_2(get_images_for_issue_4509):
+    # ref: issues/4509
+    _parent, _child, _expected, _expected_alternates = get_images_for_issue_4509
+    parent = _parent.copy() # needed to avoid mutating the fixture
+    child = _child.copy()
+    expected = _expected.copy()
+    expected_alternates = _expected_alternates.copy()
+    expected -= 1
+    expected[expected < 0] = 0
+    expected_alternates -= 1
+    expected_alternates[expected_alternates < 0] = 0
+
+    custom_pipeline = cellprofiler_core.pipeline.Pipeline()
+    relate_objects_module = cellprofiler.modules.relateobjects.Relate()
+    relate_objects_module.x_name.value = INPUT_OBJECTS
+    relate_objects_module.y_name.value = "my_alternates"
+    relate_objects_module.find_parent_child_distances.value = (
+        cellprofiler.modules.relateobjects.D_NONE
+    )
+    relate_objects_module.wants_per_parent_means.value = False
+    relate_objects_module.set_module_num(1)
+    custom_pipeline.add_module(relate_objects_module)
+    workspace, module = make_workspace(
+        {INPUT_OBJECTS: parent, "my_alternates": child},
+        custom_pipeline=custom_pipeline
+    )
+    module.x_name.value = INPUT_OBJECTS
+    module.y_name.value = OUTPUT_OBJECTS
+    module.filter_choice.value = cellprofiler.modules.filterobjects.FI_LIMITS
+    module.measurements[0].measurement.value = "Number_Object_Number"
+    module.measurements[0].min_limit.value = 1.5
+    module.measurements[0].max_limit.value = 2.5
+    module.add_additional_object()
+    module.additional_objects[0].object_name.value = "my_alternates"
+    module.additional_objects[0].target_name.value = "my_additional_result"
+    module.additional_objects[0].keep_unassociated_objects.value = False
+    m = workspace.measurements
+    m.add_measurement(INPUT_OBJECTS, "Number_Object_Number", [1, 2, 3, 4, 5])
+    relate_objects_module.run(workspace)
     module.run(workspace)
     labels = workspace.object_set.get_objects(OUTPUT_OBJECTS)
     alternates = workspace.object_set.get_objects("my_additional_result")
