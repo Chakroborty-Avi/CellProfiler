@@ -791,7 +791,9 @@ measurement is not available at this stage of the pipeline. Consider adding modu
 
                 # orphan children get new labels. Labels are always continuous and start at 1
                 target_label_numbers[target_label_numbers != 0] = numpy.arange(1, new_child_object_count + 1)
-                target_label_numbers = numpy.array([0, *target_label_numbers])
+                
+                # Add zero for background label
+                target_label_numbers = numpy.pad(target_label_numbers, (1, 0))
                 
                 # Overwrite orphan children new labels with 0 to remove unassociated objects
                 if not keep_unassociated_objects:
@@ -1490,6 +1492,8 @@ measurement is not available at this stage of the pipeline. Consider adding modu
             additional_target_names = additional_object_settings[1::2]
 
             (allow_fuzzy, ) = setting_values[additional_object_settings_index_offset + ((additional_object_count)*2):]
+            
+            # Add 'No' for keep_unassociated_objects setting
             new_additional_object_settings = sum(
                 [
                     [object_name, target_name, "No"]

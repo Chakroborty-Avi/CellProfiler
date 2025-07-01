@@ -1,8 +1,4 @@
-from cgi import test
-from math import exp
-import re
 import numpy
-import unittest
 import pytest
 
 import cellprofiler_core.image
