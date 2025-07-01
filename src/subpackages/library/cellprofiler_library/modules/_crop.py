@@ -35,8 +35,8 @@ def measure_area_retained_after_cropping(cropping: Image2DMask) -> int:
 def measure_original_image_area(orig_image_pixels: Image2D) -> int:
     return numpy.product(orig_image_pixels.shape)
 
-def get_measurements(cropping: Image2DMask, orig_image_pixels:Image2D) -> List[Tuple[str, str, int]]:
+def get_measurements(cropping: Image2DMask, orig_image_pixels:Image2D, original_image_name: str = "OriginalImage", cropped_image_name: str = "CroppedImage") -> List[Tuple[str, str, int]]:
     orig_image_area = measure_original_image_area(orig_image_pixels)
     area_retained_after_cropping = measure_area_retained_after_cropping(cropping)
-    return [(str(Measurement.AREA_RETAINED % "OriginalImage"), str(orig_image_area), orig_image_area),
-            (str(Measurement.AREA_RETAINED % "CroppedImage"), str(area_retained_after_cropping), area_retained_after_cropping)]
+    return [("Image", str(Measurement.ORIGINAL_AREA % original_image_name), orig_image_area),
+            ("Image", str(Measurement.AREA_RETAINED % cropped_image_name), area_retained_after_cropping)]

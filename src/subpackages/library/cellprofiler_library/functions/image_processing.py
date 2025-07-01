@@ -680,7 +680,7 @@ def fix_illumination_function(
 # Crop
 ################################################################################
 
-def apply_ellipse_cropping(orig_image_pixels: Image2D, ellipse_center: Tuple[float, float] , ellipse_radius: Tuple[float, float]) -> Image2DMask:
+def get_ellipse_cropping(orig_image_pixels: Image2D, ellipse_center: Tuple[float, float] , ellipse_radius: Tuple[float, float]) -> Image2DMask:
     x_center, y_center = ellipse_center
     x_radius, y_radius = ellipse_radius
     x_max = orig_image_pixels.shape[1]
@@ -703,7 +703,7 @@ def apply_ellipse_cropping(orig_image_pixels: Image2D, ellipse_center: Tuple[flo
     return cropping
 
 
-def apply_rectangle_cropping(orig_image_pixels: Image2D, horizontal_limits: Tuple[Union[int, None], Union[int, None]], vertical_limits: Tuple[Union[int, None], Union[int, None]], validate_boundaries: bool=True) -> Image2DMask:
+def get_rectangle_cropping(orig_image_pixels: Image2D, horizontal_limits: Tuple[Union[int, None], Union[int, None]], vertical_limits: Tuple[Union[int, None], Union[int, None]], validate_boundaries: bool=True) -> Image2DMask:
     cropping = numpy.ones(orig_image_pixels.shape[:2], bool)
     left, right = horizontal_limits
     top, bottom = vertical_limits

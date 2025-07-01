@@ -58,8 +58,8 @@ from cellprofiler_core.setting.subscriber import ImageSubscriber
 from cellprofiler_core.setting.subscriber import LabelSubscriber
 from cellprofiler_core.setting.text import CropImageName
 from cellprofiler_core.setting.text import Integer
-from cellprofiler_library.functions.image_processing import apply_ellipse_cropping, apply_rectangle_cropping
-from cellprofiler_library.modules._crop import remove_rows_and_columns
+from cellprofiler_library.functions.image_processing import get_ellipse_cropping, get_rectangle_cropping
+from cellprofiler_library.modules._crop import remove_rows_and_columns, get_measurements
 from cellprofiler_library.opts.crop import RemovalMethod, Measurement, Shape, CroppingMethod, CroppingPattern, Limits, Ellipse, Rectangle
 LOGGER = logging.getLogger(__name__)
 
@@ -422,7 +422,7 @@ objects:
                 Ellipse.YRADIUS: self.ellipse_y_radius.value,
             }
         
-            cropping = apply_ellipse_cropping(
+            cropping = get_ellipse_cropping(
                 orig_image.pixel_data, 
                 (self.ellipse_center.x, self.ellipse_center.y), 
                 (self.ellipse_x_radius.value, self.ellipse_y_radius.value)
@@ -435,7 +435,7 @@ objects:
             v_min = self.vertical_limits.min if not self.vertical_limits.unbounded_min else None
             v_max = self.vertical_limits.max if not self.vertical_limits.unbounded_max else None
 
-            cropping = apply_rectangle_cropping(orig_image.pixel_data, (h_min, h_max), (v_min, v_max), validate_boundaries=True)
+            cropping = get_rectangle_cropping(orig_image.pixel_data, (h_min, h_max), (v_min, v_max), validate_boundaries=True)
         else:
             raise NotImplementedError(f"Cropping shape {self.shape.value} or crop method {self.crop_method} not supported.")
         
@@ -480,13 +480,10 @@ objects:
         #
         # Save the old and new image sizes
         #
-        original_image_area = numpy.product(orig_image.pixel_data.shape[:2])
-        area_retained_after_cropping = numpy.sum(cropping)
-        feature = Measurement.AREA_RETAINED % self.cropped_image_name.value
         m = workspace.measurements
-        m.add_measurement("Image", feature, numpy.array([area_retained_after_cropping]))
-        feature = Measurement.ORIGINAL_AREA % self.cropped_image_name.value
-        m.add_measurement("Image", feature, numpy.array([original_image_area]))
+        for measurement in get_measurements(cropping, orig_image.pixel_data, self.cropped_image_name.value, self.original_image_name.value):
+            m.add_measurement("Image", measurement[1], numpy.array([measurement[2]]))
+
 
     def display(self, workspace, figure):
         orig_image_pixel_data = workspace.display_data.orig_image_pixel_data
@@ -519,11 +516,11 @@ objects:
         if self.shape.value == Shape.ELLIPSE:
             center = d[Shape.ELLIPSE][Ellipse.XCENTER], d[Shape.ELLIPSE][Ellipse.YCENTER]
             radius = d[Shape.ELLIPSE][Ellipse.XRADIUS], d[Shape.ELLIPSE][Ellipse.YRADIUS]   
-            return apply_ellipse_cropping(orig_image.pixel_data, center, radius)
+            return get_ellipse_cropping(orig_image.pixel_data, center, radius)
         else:
             horizontal_limits = int(numpy.round(d[Shape.RECTANGLE][Rectangle.LEFT])), int(numpy.round(d[Shape.RECTANGLE][Rectangle.RIGHT]))
             vertical_limits = int(numpy.round(d[Shape.RECTANGLE][Rectangle.TOP])), int(numpy.round(d[Shape.RECTANGLE][Rectangle.BOTTOM]))
-            return apply_rectangle_cropping(orig_image.pixel_data, horizontal_limits, vertical_limits)
+            return get_rectangle_cropping(orig_image.pixel_data, horizontal_limits, vertical_limits)
 
     def handle_interaction(self, current_shape, orig_image):
         from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
@@ -831,21 +828,6 @@ objects:
                 Ellipse.XRADIUS: shape.width / 2,
                 Ellipse.YRADIUS: shape.height / 2,
             }
-
-    def get_ellipse_cropping(self, workspace, orig_image, ellipse_center, ellipse_radius, d):
-        """Crop into an ellipse using user-specified coordinates"""
-        x_center, y_center = ellipse_center
-        x_radius, y_radius = ellipse_radius
-        d[Shape.ELLIPSE] = {
-            Ellipse.XCENTER: x_center,
-            Ellipse.YCENTER: y_center,
-            Ellipse.XRADIUS: x_radius,
-            Ellipse.YRADIUS: y_radius,
-        }
-        
-        return apply_ellipse_cropping(orig_image.pixel_data, ellipse_center, ellipse_radius)
-
-
 
 
     def upgrade_settings(self, setting_values, variable_revision_number, module_name):
