@@ -59,7 +59,7 @@ from cellprofiler_core.setting.subscriber import LabelSubscriber
 from cellprofiler_core.setting.text import CropImageName
 from cellprofiler_core.setting.text import Integer
 from cellprofiler_library.functions.image_processing import get_ellipse_cropping, get_rectangle_cropping
-from cellprofiler_library.modules._crop import remove_rows_and_columns, get_measurements
+from cellprofiler_library.modules._crop import crop, get_measurements
 from cellprofiler_library.opts.crop import RemovalMethod, Measurement, Shape, CroppingMethod, CroppingPattern, Limits, Ellipse, Rectangle
 LOGGER = logging.getLogger(__name__)
 
@@ -442,7 +442,7 @@ objects:
         assert(cropping is not None)
         assert(cropping.dtype == bool)
         
-        cropped_pixel_data, mask, image_mask = remove_rows_and_columns(self.remove_rows_and_columns.value, orig_image.pixel_data, cropping, mask, orig_image.mask)
+        cropped_pixel_data, mask, image_mask = crop(orig_image.pixel_data, cropping, mask, orig_image.mask, self.remove_rows_and_columns.value)
             
 
         if self.shape.value == Shape.OBJECTS:
@@ -481,7 +481,7 @@ objects:
         # Save the old and new image sizes
         #
         m = workspace.measurements
-        for measurement in get_measurements(cropping, orig_image.pixel_data, self.cropped_image_name.value, self.original_image_name.value):
+        for measurement in get_measurements(cropping, orig_image.pixel_data, self.cropped_image_name.value):
             m.add_measurement("Image", measurement[1], numpy.array([measurement[2]]))
 
 
