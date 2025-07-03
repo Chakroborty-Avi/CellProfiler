@@ -703,10 +703,13 @@ def get_ellipse_cropping(orig_image_pixels: Image2D, ellipse_center: Tuple[float
     return cropping
 
 
-def get_rectangle_cropping(orig_image_pixels: Image2D, horizontal_limits: Tuple[Union[int, None], Union[int, None]], vertical_limits: Tuple[Union[int, None], Union[int, None]], validate_boundaries: bool=True) -> Image2DMask:
+def get_rectangle_cropping(
+    orig_image_pixels: Annotated[Image2D, Field(description="Pixel values of the original image")],
+    bounding_box: Annotated[Tuple[Union[int, None], Union[int, None], Union[int, None], Union[int, None]], Field(description="Bounding box as (left, right, top, bottom) for cropping")],
+    validate_boundaries: Annotated[bool, Field(description="Whether to validate cropping boundaries")] = True
+) -> Annotated[Image2DMask, Field(description="Mask indicating the cropped region")]:
     cropping = numpy.ones(orig_image_pixels.shape[:2], bool)
-    left, right = horizontal_limits
-    top, bottom = vertical_limits
+    left, right, top, bottom = bounding_box
     if validate_boundaries:
         if left and left > 0:
             cropping[:, :left] = False

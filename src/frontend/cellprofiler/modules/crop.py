@@ -435,7 +435,7 @@ objects:
             v_min = self.vertical_limits.min if not self.vertical_limits.unbounded_min else None
             v_max = self.vertical_limits.max if not self.vertical_limits.unbounded_max else None
 
-            cropping = get_rectangle_cropping(orig_image.pixel_data, (h_min, h_max), (v_min, v_max), validate_boundaries=True)
+            cropping = get_rectangle_cropping(orig_image.pixel_data, (h_min, h_max, v_min, v_max), validate_boundaries=True)
         else:
             raise NotImplementedError(f"Cropping shape {self.shape.value} or crop method {self.crop_method} not supported.")
         
@@ -518,9 +518,13 @@ objects:
             radius = d[Shape.ELLIPSE][Ellipse.XRADIUS], d[Shape.ELLIPSE][Ellipse.YRADIUS]   
             return get_ellipse_cropping(orig_image.pixel_data, center, radius)
         else:
-            horizontal_limits = int(numpy.round(d[Shape.RECTANGLE][Rectangle.LEFT])), int(numpy.round(d[Shape.RECTANGLE][Rectangle.RIGHT]))
-            vertical_limits = int(numpy.round(d[Shape.RECTANGLE][Rectangle.TOP])), int(numpy.round(d[Shape.RECTANGLE][Rectangle.BOTTOM]))
-            return get_rectangle_cropping(orig_image.pixel_data, horizontal_limits, vertical_limits)
+            bounding_box = (
+                int(numpy.round(d[Shape.RECTANGLE][Rectangle.LEFT])),
+                int(numpy.round(d[Shape.RECTANGLE][Rectangle.RIGHT])),
+                int(numpy.round(d[Shape.RECTANGLE][Rectangle.TOP])),
+                int(numpy.round(d[Shape.RECTANGLE][Rectangle.BOTTOM])),
+            )
+            return get_rectangle_cropping(orig_image.pixel_data, bounding_box, validate_boundaries=True)
 
     def handle_interaction(self, current_shape, orig_image):
         from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
