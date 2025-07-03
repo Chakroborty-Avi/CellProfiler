@@ -9,7 +9,7 @@ import matplotlib
 
 from cellprofiler_library.opts.crop import RemovalMethod
 from ..opts import threshold as Threshold
-from typing import Annotated, Any, Literal, Optional, Tuple, Callable, Union, Sequence
+from typing import Annotated, Any, Literal, Optional, Tuple, Callable, Union, Sequence, Generator
 from pydantic import Field, BeforeValidator, ConfigDict
 from ..types import Image2D, Image2DMask, ImageAny, ImageGrayscale, ImageGrayscaleMask, Image2DColor, Image2DGrayscale
 import math
@@ -879,3 +879,39 @@ def erase_pixels(
     else:
         cropped_pixel_data[~crop] = 0
     return cropped_pixel_data
+
+
+################################################################################
+# MeasureColocalization
+################################################################################
+
+def crop_image_similarly(this_image, other_image, this_crop_mask):
+    """Crop a 2-d or 3-d image (other_image) using this image's crop mask
+
+    image - a np.ndarray to be cropped (of any type)
+    """
+    if other_image.shape[:2] == this_image.shape[:2]:
+        # Same size - no cropping needed
+        return other_image
+    if any(
+        [
+            my_size > other_size
+            for my_size, other_size in zip(this_image.shape, other_image.shape)
+        ]
+    ):
+        raise ValueError(
+            "Image to be cropped is smaller: %s vs %s"
+            % (repr(other_image.shape), repr(this_image.shape))
+        )
+    if not this_crop_mask:
+        raise RuntimeError(
+            "Images are of different size and no crop mask available.\n"
+            "Use the Crop and Align modules to match images of different sizes."
+        )
+    cropped_image = crop_image(other_image, this_crop_mask)
+    if cropped_image.shape[0:2] != this_image.shape[0:2]:
+        raise ValueError(
+            "Cropped image is not the same size as the reference image: %s vs %s"
+            % (repr(cropped_image.shape), repr(this_image.shape))
+        )
+    return cropped_image
