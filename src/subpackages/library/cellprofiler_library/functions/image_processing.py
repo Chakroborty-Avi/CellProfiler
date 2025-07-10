@@ -11,8 +11,9 @@ from cellprofiler_library.opts.crop import RemovalMethod
 from ..opts import threshold as Threshold
 from typing import Annotated, Any, Literal, Optional, Tuple, Callable, Union, Sequence, Generator
 from pydantic import Field, BeforeValidator, ConfigDict
-from ..types import Image2D, Image2DMask, ImageAny, ImageGrayscale, ImageGrayscaleMask, Image2DColor, Image2DGrayscale
+from ..types import Image2D, Image2DMask, ImageAny, ImageGrayscale, ImageGrayscaleMask, Image2DColor, Image2DGrayscale, ObjectLabelsDense
 import math
+from centrosome.cpmorphology import fixup_scipy_ndimage_result as fix
 
 def __must_be_grayscale(imag_pixels: ImageAny) -> ImageGrayscale:
     pd = imag_pixels
@@ -449,6 +450,7 @@ def get_global_threshold(
     threshold_correction_factor: Annotated[float, Field(description="Threshold correction factor")] = 1,
     assign_middle_to_foreground: Annotated[Threshold.Assignment, Field(description="Assign middle to foreground"), BeforeValidator(str.casefold)] = Threshold.Assignment.FOREGROUND,
     log_transform:               Annotated[bool, Field(description="Log transform")] = False,
+    max_intensity_percentage:    Annotated[float, Field(description="Value to be used when thresholding as a percentage of the maximum intensity")] = 100,
     **kwargs:                    Annotated[Any, Field(description="Additional keyword arguments")],
 ) -> Annotated[float, Field(description="Threshold")]:
     conversion_dict = None
@@ -478,6 +480,8 @@ def get_global_threshold(
         kwargs["nbins"] = kwargs.get("nbins", 128)
         threshold = skimage.filters.threshold_multiotsu(image, **kwargs)
         threshold = threshold[bin_wanted]
+    elif threshold_method.casefold() == Threshold.Method.MAX_INTENSITY_PERCENTAGE:
+        threshold = max_intensity_percentage * numpy.max(image) / 100
     else:
         raise NotImplementedError(f"Threshold method {threshold_method} not supported.")
 
@@ -887,7 +891,9 @@ def erase_pixels(
 
 def crop_image_similarly(this_image, other_image, this_crop_mask):
     """Crop a 2-d or 3-d image (other_image) using this image's crop mask
-
+    crop mask is the binary image used to crop the parent image to the
+    dimensions of the child (this) image. The crop_mask is the same size as
+    the parent image.
     image - a np.ndarray to be cropped (of any type)
     """
     if other_image.shape[:2] == this_image.shape[:2]:
