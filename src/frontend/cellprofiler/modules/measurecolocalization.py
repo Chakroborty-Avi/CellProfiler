@@ -98,8 +98,12 @@ from centrosome.cpmorphology import fixup_scipy_ndimage_result as fix
 from scipy.linalg import lstsq
 from cellprofiler_core.setting.text import ImageName
 from cellprofiler_core.image import Image
-# from cellprofiler_library.functions.image_processing import 
+from cellprofiler_library.functions.image_processing import apply_threshold_to_objects
 from cellprofiler_library.functions.measurement import measure_correlation_and_slope, measure_manders_coefficient, measure_rwc_coefficient, measure_overlap_coefficient, measure_costes_coefficient, get_thresholded_images_and_counts
+from cellprofiler_library.functions.image_processing import apply_threshold, get_global_threshold
+import cellprofiler_library.opts.threshold as Threshold 
+from cellprofiler_library.opts.measurecolocalization import MeasurementType
+from cellprofiler_library.modules._measurecolocalization import run_image_pair_images
 
 M_IMAGES = "Across entire image"
 M_OBJECTS = "Within objects"
@@ -593,7 +597,32 @@ You can set a different threshold for each image selected in the module.
                 self.images_list
             )
         return image1_dims
-
+    def prepare_images(self, workspace, first_image_name, second_image_name):
+        first_image = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
+        second_image = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
+        
+        first_pixel_count = numpy.prod(first_image.pixel_data.shape)
+        second_pixel_count = numpy.prod(second_image.pixel_data.shape)
+        
+        first_mask = first_image.mask
+        second_mask = second_image.mask
+        
+        first_pixel_data = first_image.pixel_data
+        second_pixel_data = second_image.pixel_data
+        if first_pixel_count < second_pixel_count:
+            second_pixel_data = first_image.crop_image_similarly(second_image.pixel_data)
+            second_mask = first_image.crop_image_similarly(second_image.mask)
+        elif second_pixel_count < first_pixel_count:
+            first_pixel_data = second_image.crop_image_similarly(first_image.pixel_data)
+            first_mask = second_image.crop_image_similarly(first_image.mask)
+        mask = (
+            first_mask
+            & second_mask
+            & (~numpy.isnan(first_pixel_data))
+            & (~numpy.isnan(second_pixel_data))
+        )
+        return first_pixel_data, second_pixel_data, mask
+    
     def run(self, workspace):
         """Calculate measurements on an image set"""
         col_labels = ["First image", "Second image", "Objects", "Measurement", "Value"]
@@ -604,16 +633,32 @@ You can set a different threshold for each image selected in the module.
         for first_image_name, second_image_name in self.get_image_pairs():
             image_dims = self.verify_image_dims(workspace, first_image_name, second_image_name)
 
-            first_image = workspace.image_set.get_image(
-                first_image_name, must_be_grayscale=True
-            )
-            second_image = workspace.image_set.get_image(
-                second_image_name, must_be_grayscale=True
-            )
+            first_pixel_data, second_pixel_data, mask = self.prepare_images(workspace, first_image_name, second_image_name)
+            kwargs = {}
             if self.wants_images():
-                statistics += self.run_image_pair_images(
-                    workspace, first_image_name, first_image, second_image_name, second_image
+                first_threshold_value = self.get_image_threshold_value(first_image_name)
+                second_threshold_value = self.get_image_threshold_value(second_image_name)
+                measurement_types = []
+                if self.do_corr_and_slope:
+                    measurement_types.append(MeasurementType.CORRELATION)
+                if self.do_manders:
+                    measurement_types.append(MeasurementType.MANDERS)
+                if self.do_rwc:
+                    measurement_types.append(MeasurementType.RWC)
+                if self.do_overlap:
+                    measurement_types.append(MeasurementType.OVERLAP)
+                if self.do_costes:
+                    measurement_types.append(MeasurementType.COSTES)
+                    kwargs["costes_method"] = self.fast_costes.value
+                    kwargs["first_image_scale"] = workspace.image_set.get_image(first_image_name).scale
+                    kwargs["second_image_scale"] = workspace.image_set.get_image(second_image_name).scale
+                measurements_result, colocalization_measurements = run_image_pair_images(
+                    first_pixel_data, second_pixel_data, first_image_name, second_image_name, mask, first_threshold_value, second_threshold_value, measurement_types, **kwargs
                 )
+                statistics += measurements_result
+                for measurement_name, measurement_value in colocalization_measurements.items():
+                    workspace.measurements.add_image_measurement(measurement_name, measurement_value)
+
             if self.wants_objects():
                 for object_name in self.objects_list.value:
                     statistics += self.run_image_pair_objects(
@@ -678,13 +723,9 @@ You can set a different threshold for each image selected in the module.
             plotting_row += 1
 
             # Thresholding code used from run_image_pair_images() and run_image_pair_objects()
-            image_pixel_data = image.pixel_data
-            image_mask = image.mask
-            image_mask = image_mask & (~numpy.isnan(image_pixel_data))
             threshold_value = self.get_image_threshold_value(image_name)
             if self.wants_images():
-                
-                thr_i_out = self.get_thresholded_mask(workspace, image_name, t_val=threshold_value)
+                thr_i_out = self.get_thresholded_mask(image_name, workspace)
                 figure.subplot_imshow_grayscale(
                     idx,
                     plotting_row, 
@@ -696,7 +737,7 @@ You can set a different threshold for each image selected in the module.
                 plotting_row += 1
             if self.wants_objects():
                 for object_name in self.objects_list.value:
-                    threshold_mask_image = self.get_thresholded_mask(workspace, image_name, object_name=object_name, t_val=threshold_value)
+                    threshold_mask_image = self.get_thresholded_mask(image_name, workspace, object_name=object_name)
                     figure.subplot_imshow_grayscale(
                         idx,
                         plotting_row,
@@ -706,21 +747,10 @@ You can set a different threshold for each image selected in the module.
                     )
                     plotting_row += 1
 
-    def get_thresholded_mask(self, workspace, image_name, object_name=None, t_val=None):
-        """
-        Get the numpy array of the mask of the thresholded image
+    def get_thresholded_mask(self, image_name, workspace, object_name=None):
 
-        :param image: The image object
-        :type image: cellprofiler_core.image.Image
-        :param objects: The objects object, Performs thresholding on the entire image if None
-        :type objects: cellprofiler_core.object.Objects
-        :param t_val: The threshold value to use for thresholding. If not None, the default / user specified value will be overridden
-        :type t_val: float
-        :return: The numpy array of the mask of the thresholded image
-        """
         image = workspace.image_set.get_image(image_name, must_be_grayscale=True)
-        if t_val is None:
-            t_val = self.get_image_threshold_value(image_name)
+        t_val = self.get_image_threshold_value(image_name)
         # Thresholding code used from run_image_pair_images() and run_image_pair_objects()
         image_pixel_data = image.pixel_data
         image_mask = image.mask
@@ -728,38 +758,23 @@ You can set a different threshold for each image selected in the module.
         output_image_arr = numpy.zeros_like(image_pixel_data)
         if object_name is None:
             # perform on the entire image
+            
             if numpy.any(image_mask):
-                    thr_i = t_val * numpy.max(image_pixel_data) / 100
-                    output_image_arr = image_pixel_data > thr_i
+                thr_i = get_global_threshold(image_pixel_data, None, Threshold.Method.MAX_INTENSITY_PERCENTAGE, max_intensity_percentage=t_val)
+                output_image_arr, _ = apply_threshold(image_pixel_data, thr_i)
         else:
             # perform on the object
             objects = workspace.object_set.get_objects(object_name)
             labels = objects.segmented
             try:
-                image_pixels = objects.crop_image_similarly(image.pixel_data)
-                image_mask = objects.crop_image_similarly(image.mask)
+                image_pixels = objects.crop_image_similarly(image_pixel_data)
+                image_mask = objects.crop_image_similarly(image_mask)
             except ValueError:
-                image_pixels, m1 = size_similarly(labels, image.pixel_data)
-                image_mask, m1 = size_similarly(labels, image.mask)
+                image_pixels, m1 = size_similarly(labels, image_pixel_data)
+                image_mask, m1 = size_similarly(labels, image_mask)
                 image_mask[~m1] = False
+            output_image_arr = apply_threshold_to_objects(image_pixels, labels, t_val, image_mask)  
 
-            mask = ((labels > 0) & image_mask) & (~numpy.isnan(image_pixels))
-            labels = labels[mask]
-            
-            if numpy.any(mask):
-                image_pixels = image_pixels[mask]
-            n_objects = objects.count
-
-            if (not (n_objects == 0)) and (not (numpy.where(mask)[0].__len__() == 0)):
-                lrange = numpy.arange(n_objects, dtype=numpy.int32) + 1
-                # Threshold as percentage of maximum intensity of objects in each channel
-                scaled_image = (t_val / 100) * fix(
-                    scipy.ndimage.maximum(image_pixels, labels, lrange)
-                )
-
-                # convert 1d array into 2d image using mask as index
-                output_image_arr = numpy.zeros_like(mask)
-                output_image_arr[mask] = (image_pixels >= scaled_image[labels - 1])
         return output_image_arr
 
     def save_requested_masks(self, workspace):
@@ -771,7 +786,8 @@ You can set a different threshold for each image selected in the module.
             original_image = workspace.image_set.get_image(image_name, must_be_grayscale=True)
             
             # Call the relevant funcitons to get the thresholded masks
-            output_image = Image(self.get_thresholded_mask(workspace, image_name, object_name), parent_image=original_image)
+            t_val = self.get_image_threshold_value(image_name)
+            output_image = Image(self.get_thresholded_mask(image_name, workspace, object_name), parent_image=original_image)
 
             # Save the mask to the image set
             workspace.image_set.add(save_image_name, output_image)
@@ -784,158 +800,6 @@ You can set a different threshold for each image selected in the module.
                     return threshold.threshold_for_channel.value
         return self.thr.value
 
-    def run_image_pair_images(self, workspace, first_image_name, first_image, second_image_name, second_image):
-        """Calculate the correlation between the pixels of two images"""
-        first_image = workspace.image_set.get_image(
-            first_image_name, must_be_grayscale=True
-        )
-        second_image = workspace.image_set.get_image(
-            second_image_name, must_be_grayscale=True
-        )
-        first_pixel_data = first_image.pixel_data
-        first_mask = first_image.mask
-        first_pixel_count = numpy.prod(first_pixel_data.shape)
-        second_pixel_data = second_image.pixel_data
-        second_mask = second_image.mask
-        second_pixel_count = numpy.prod(second_pixel_data.shape)
-        #
-        # Crop the larger image similarly to the smaller one
-        #
-        if first_pixel_count < second_pixel_count:
-            second_pixel_data = first_image.crop_image_similarly(second_pixel_data)
-            second_mask = first_image.crop_image_similarly(second_mask)
-        elif second_pixel_count < first_pixel_count:
-            first_pixel_data = second_image.crop_image_similarly(first_pixel_data)
-            first_mask = second_image.crop_image_similarly(first_mask)
-        mask = (
-            first_mask
-            & second_mask
-            & (~numpy.isnan(first_pixel_data))
-            & (~numpy.isnan(second_pixel_data))
-        )
-        result = []
-        corr = numpy.NaN
-        slope = numpy.NaN
-        C1 = numpy.NaN
-        C2 = numpy.NaN
-        M1 = numpy.NaN
-        M2 = numpy.NaN
-        RWC1 = numpy.NaN
-        RWC2 = numpy.NaN
-        overlap = numpy.NaN
-        K1 = numpy.NaN
-        K2 = numpy.NaN
-        if numpy.any(mask):
-            fi = first_pixel_data[mask]
-            si = second_pixel_data[mask]
-
-            if self.do_corr_and_slope:
-                res, corr, slope = measure_correlation_and_slope(fi, si, first_image_name, second_image_name)
-                result += res
-
-            combined_thresh = None
-            fi_thresh = None
-            si_thresh = None
-            tot_fi_thr = None
-            tot_si_thr = None
-            if any((self.do_manders, self.do_rwc, self.do_overlap)):
-                # Get channel-specific thresholds from thresholds array
-                # Threshold as percentage of maximum intensity in each channel
-                first_threshold_value = self.get_image_threshold_value(first_image_name)
-                second_threshold_value = self.get_image_threshold_value(second_image_name)
-                _, _, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh = get_thresholded_images_and_counts(fi, si, first_threshold_value, second_threshold_value)
-
-            if self.do_manders:
-                res, M1, M2 = measure_manders_coefficient(fi, si, first_image_name, second_image_name, None, None, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr)
-                result += res
-
-            if self.do_rwc:
-                res, RWC1, RWC2 = measure_rwc_coefficient(fi, si, first_image_name, second_image_name, None, None, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh)
-                result += res
-
-            if self.do_overlap:
-                res, overlap, K1, K2 = measure_overlap_coefficient(fi, si, first_image_name, second_image_name, None, None, fi_thresh, si_thresh)
-                result += res
-
-            if self.do_costes:
-                res, C1, C2 = measure_costes_coefficient(
-                    fi, 
-                    si, 
-                    first_image_name, 
-                    second_image_name, 
-                    first_image.scale,
-                    second_image.scale, 
-                    None, 
-                    None,
-                    fi_thresh, 
-                    si_thresh,
-                    costes_method=self.fast_costes.value
-                    )
-                result += res
-
-        else:
-            corr = numpy.NaN
-            slope = numpy.NaN
-            C1 = numpy.NaN
-            C2 = numpy.NaN
-            M1 = numpy.NaN
-            M2 = numpy.NaN
-            RWC1 = numpy.NaN
-            RWC2 = numpy.NaN
-            overlap = numpy.NaN
-            K1 = numpy.NaN
-            K2 = numpy.NaN
-
-        #
-        # Add the measurements
-        #
-        if self.do_corr_and_slope:
-            corr_measurement = F_CORRELATION_FORMAT % (
-                first_image_name,
-                second_image_name,
-            )
-            slope_measurement = F_SLOPE_FORMAT % (first_image_name, second_image_name)
-            workspace.measurements.add_image_measurement(corr_measurement, corr)
-            workspace.measurements.add_image_measurement(slope_measurement, slope)
-        if self.do_overlap:
-            overlap_measurement = F_OVERLAP_FORMAT % (
-                first_image_name,
-                second_image_name,
-            )
-            k_measurement_1 = F_K_FORMAT % (first_image_name, second_image_name)
-            k_measurement_2 = F_K_FORMAT % (second_image_name, first_image_name)
-            workspace.measurements.add_image_measurement(overlap_measurement, overlap)
-            workspace.measurements.add_image_measurement(k_measurement_1, K1)
-            workspace.measurements.add_image_measurement(k_measurement_2, K2)
-        if self.do_manders:
-            manders_measurement_1 = F_MANDERS_FORMAT % (
-                first_image_name,
-                second_image_name,
-            )
-            manders_measurement_2 = F_MANDERS_FORMAT % (
-                second_image_name,
-                first_image_name,
-            )
-            workspace.measurements.add_image_measurement(manders_measurement_1, M1)
-            workspace.measurements.add_image_measurement(manders_measurement_2, M2)
-        if self.do_rwc:
-            rwc_measurement_1 = F_RWC_FORMAT % (first_image_name, second_image_name)
-            rwc_measurement_2 = F_RWC_FORMAT % (second_image_name, first_image_name)
-            workspace.measurements.add_image_measurement(rwc_measurement_1, RWC1)
-            workspace.measurements.add_image_measurement(rwc_measurement_2, RWC2)
-        if self.do_costes:
-            costes_measurement_1 = F_COSTES_FORMAT % (
-                first_image_name,
-                second_image_name,
-            )
-            costes_measurement_2 = F_COSTES_FORMAT % (
-                second_image_name,
-                first_image_name,
-            )
-            workspace.measurements.add_image_measurement(costes_measurement_1, C1)
-            workspace.measurements.add_image_measurement(costes_measurement_2, C2)
-
-        return result
 
     def run_image_pair_objects(
         self, workspace, first_image_name, second_image_name, object_name
