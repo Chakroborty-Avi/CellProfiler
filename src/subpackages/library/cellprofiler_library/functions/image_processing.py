@@ -921,3 +921,37 @@ def crop_image_similarly(this_image, other_image, this_crop_mask):
             % (repr(cropped_image.shape), repr(this_image.shape))
         )
     return cropped_image
+
+def apply_threshold_to_objects(
+        image:              Annotated[ImageGrayscale, Field(description="Image to threshold")],
+        segmented:          Annotated[ObjectLabelsDense, Field(description="Object Labels")],
+        threshold_value:    Annotated[float, Field(description="Threshold value")],
+        mask:               Annotated[Optional[ImageGrayscaleMask], Field(description="Mask to apply to the image")] = None,
+        ) -> Annotated[ImageGrayscaleMask, Field(description="Binary image")]:
+    output_image_arr = numpy.zeros_like(image)
+    if mask is None:
+        # Create a fake mask if one isn't provided
+        mask = numpy.full(segmented.shape, True)
+    assert (image.shape == segmented.shape)
+    mask = (segmented > 0) & mask & (~numpy.isnan(image))
+    segmented = segmented.copy()
+    segmented = segmented[mask]
+    n_objects = len(numpy.unique(segmented))
+    if (not (n_objects == 0)) and (not (numpy.where(mask)[0].__len__() == 0)):
+        #
+        # First get the maximum intensity of each object and create
+        # a 1d array of floats representing the threshold for each object
+        #
+        lrange = numpy.arange(n_objects, dtype=numpy.int32) + 1
+        # Threshold as percentage of maximum intensity of objects in each channel
+        scaled_image = (threshold_value / 100) * fix(
+            scipy.ndimage.maximum(image, segmented, lrange)
+        )
+
+        #
+        # Apply the threshold to the image
+        # Use the mask to apply to specific pixels
+        #
+        output_image_arr[mask] = (image >= scaled_image[segmented - 1])        
+
+    return output_image_arr

@@ -19,9 +19,13 @@ from cellprofiler_library.functions.segmentation import cast_labels_to_label_set
 
 from cellprofiler_library.opts.objectsizeshapefeatures import ObjectSizeShapeFeatures
 from scipy.linalg import lstsq
-from cellprofiler_library.types import Image2DGrayscale
-from typing import Optional, Tuple
+from cellprofiler_library.types import Image2DGrayscale, ObjectLabelsDense
+from typing import Optional, Tuple, List, Sequence
 from cellprofiler_library.opts.measurecolocalization import CostesMethod
+from centrosome.cpmorphology import fixup_scipy_ndimage_result as fix
+import scipy.ndimage
+from numpy.typing import NDArray
+
 
 
 def measure_image_overlap_statistics(
@@ -902,13 +906,71 @@ def measure_object_size_shape(
 ########################################################
 # MeasureColocalization
 ########################################################
+# TODO: Decide if the code for image and object should be combined into a single function
 
+# TODO: verify types
+# TODO: move to image_processing.py
+def get_thresholded_images_and_counts(
+    first_image: Image2DGrayscale, 
+    second_image: Image2DGrayscale,
+    first_threshold_value: float,
+    second_threshold_value: float,
+) -> Tuple[float, float, NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.bool_]]:
+    fi = first_image
+    si = second_image
+    thr_fi = first_threshold_value * numpy.max(fi) / 100
+    thr_si = second_threshold_value * numpy.max(si) / 100
+    combined_thresh = (fi > thr_fi) & (si > thr_si)
+    fi_thresh = fi[combined_thresh]
+    si_thresh = si[combined_thresh]
+    tot_fi_thr = fi[(fi > thr_fi)].sum()
+    tot_si_thr = si[(si > thr_si)].sum()
+    return thr_fi, thr_si, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh
+
+# TODO: verify types
+def get_thresholded_images_and_counts_from_objects(
+    first_pixels: np.ndarray,
+    second_pixels: np.ndarray,
+    im1_threshold: float,
+    im2_threshold: float,
+    labels: ObjectLabelsDense
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.int32], NDArray[np.int32], NDArray[np.bool_]]:
+    lrange = numpy.arange(labels.max(), dtype=numpy.int32) + 1
+    # Threshold as percentage of maximum intensity of objects in each channel
+    tff = (im1_threshold / 100) * fix(
+        scipy.ndimage.maximum(first_pixels, labels, lrange)
+    )
+    tss = (im2_threshold / 100) * fix(
+        scipy.ndimage.maximum(second_pixels, labels, lrange)
+            )
+
+    combined_thresh = (first_pixels >= tff[labels - 1]) & (second_pixels >= tss[labels - 1])
+    fi_thresh = first_pixels[combined_thresh]
+    si_thresh = second_pixels[combined_thresh]
+    tot_fi_thr = scipy.ndimage.sum(
+        first_pixels[first_pixels >= tff[labels - 1]],
+        labels[first_pixels >= tff[labels - 1]],
+        lrange,
+    )
+    tot_si_thr = scipy.ndimage.sum(
+        second_pixels[second_pixels >= tss[labels - 1]],
+        labels[second_pixels >= tss[labels - 1]],
+        lrange,
+    )
+    fi_thresh = fi_thresh.astype(numpy.float64)
+    si_thresh = si_thresh.astype(numpy.float64)
+    tot_fi_thr = tot_fi_thr.astype(numpy.int32)
+    tot_si_thr = tot_si_thr.astype(numpy.int32)
+    combined_thresh = combined_thresh.astype(numpy.bool_)
+    return fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh
+
+# TODO: verify types
 def measure_correlation_and_slope(
         first_image: Image2DGrayscale, 
         second_image: Image2DGrayscale,
         first_image_name: str, 
         second_image_name: str, 
-    ):
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     result = []
     #
     # Perform the correlation, which returns:
@@ -939,24 +1001,7 @@ def measure_correlation_and_slope(
     ]
     return result, corr, slope
 
-
-def get_thresholded_images_and_counts(
-    first_image: Image2DGrayscale, 
-    second_image: Image2DGrayscale,
-    first_threshold_value: float,
-    second_threshold_value: float,
-):
-    fi = first_image
-    si = second_image
-    thr_fi = first_threshold_value * numpy.max(fi) / 100
-    thr_si = second_threshold_value * numpy.max(si) / 100
-    combined_thresh = (fi > thr_fi) & (si > thr_si)
-    fi_thresh = fi[combined_thresh]
-    si_thresh = si[combined_thresh]
-    tot_fi_thr = fi[(fi > thr_fi)].sum()
-    tot_si_thr = si[(si > thr_si)].sum()
-    return thr_fi, thr_si, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh
-
+# TODO: verify types
 def measure_manders_coefficient(
         first_image: Image2DGrayscale, 
         second_image: Image2DGrayscale,
@@ -968,7 +1013,7 @@ def measure_manders_coefficient(
         si_thresh: Optional[Image2DGrayscale] = None,
         tot_fi_thr: Optional[int] = None,
         tot_si_thr: Optional[int] = None,
-    ):
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     if fi_thresh is None or si_thresh is None or tot_fi_thr is None or tot_si_thr is None:
         assert first_threshold_value is not None
         assert second_threshold_value is not None
@@ -1004,6 +1049,311 @@ def measure_manders_coefficient(
     ]
     return result, M1, M2
 
+# TODO: verify types
+def measure_correlation_and_slope_from_objects(
+    first_pixels: np.ndarray,
+    second_pixels: np.ndarray,
+    labels: ObjectLabelsDense,
+    lrange: np.ndarray,
+    first_image_name: str,
+    second_image_name: str,
+    object_name: str,
+) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64]]:
+    result = []
+    #
+    # The correlation is sum((x-mean(x))(y-mean(y)) /
+    #                         ((n-1) * std(x) *std(y)))
+    #
+
+    mean1 = fix(scipy.ndimage.mean(first_pixels, labels, lrange))
+    mean2 = fix(scipy.ndimage.mean(second_pixels, labels, lrange))
+    #
+    # Calculate the standard deviation times the population.
+    #
+    std1 = numpy.sqrt(
+        fix(
+            scipy.ndimage.sum(
+                (first_pixels - mean1[labels - 1]) ** 2, labels, lrange
+            )
+        )
+    )
+    std2 = numpy.sqrt(
+        fix(
+            scipy.ndimage.sum(
+                (second_pixels - mean2[labels - 1]) ** 2, labels, lrange
+            )
+        )
+    )
+    x = first_pixels - mean1[labels - 1]  # x - mean(x)
+    y = second_pixels - mean2[labels - 1]  # y - mean(y)
+    corr = fix(
+        scipy.ndimage.sum(
+            x * y / (std1[labels - 1] * std2[labels - 1]), labels, lrange
+        )
+    )
+    # Explicitly set the correlation to NaN for masked objects
+    corr[scipy.ndimage.sum(1, labels, lrange) == 0] = numpy.NaN
+    col_order_1 = [first_image_name, second_image_name, object_name]
+    result += [
+        [ *col_order_1, "Mean Correlation coeff", "%.3f" % numpy.mean(corr)],
+        [ *col_order_1, "Median Correlation coeff", "%.3f" % numpy.median(corr)],
+        [ *col_order_1, "Min Correlation coeff", "%.3f" % numpy.min(corr)],
+        [ *col_order_1, "Max Correlation coeff", "%.3f" % numpy.max(corr)],
+    ]
+    return result, corr
+
+# TODO: verify types
+def measure_manders_coefficient_from_objects(
+    labels: ObjectLabelsDense,
+    lrange: np.ndarray,
+    first_image_name: str,
+    second_image_name: str,
+    object_name: str,
+    fi_thresh: Optional[Image2DGrayscale] = None,
+    si_thresh: Optional[Image2DGrayscale] = None,
+    tot_fi_thr: Optional[NDArray[np.int32]] = None,
+    tot_si_thr: Optional[NDArray[np.int32]] = None,
+    combined_thresh: Optional[Image2DGrayscale] = None,
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
+    result = []
+    # Manders Coefficient
+    M1 = numpy.zeros(len(lrange))
+    M2 = numpy.zeros(len(lrange))
+
+    if combined_thresh is not None and numpy.any(combined_thresh):
+        M1 = numpy.array(
+            scipy.ndimage.sum(fi_thresh, labels[combined_thresh], lrange)
+        ) / numpy.array(tot_fi_thr)
+        M2 = numpy.array(
+            scipy.ndimage.sum(si_thresh, labels[combined_thresh], lrange)
+        ) / numpy.array(tot_si_thr)
+    col_order_1 = [first_image_name, second_image_name, object_name]
+    result += [
+        [*col_order_1, "Mean Manders coeff", "%.3f" % numpy.mean(M1)],
+        [*col_order_1, "Median Manders coeff", "%.3f" % numpy.median(M1)],
+        [*col_order_1, "Min Manders coeff", "%.3f" % numpy.min(M1)],
+        [*col_order_1, "Max Manders coeff", "%.3f" % numpy.max(M1)],
+    ]
+    col_order_2 = [second_image_name, first_image_name, object_name]
+    result += [
+        [*col_order_2, "Mean Manders coeff", "%.3f" % numpy.mean(M2)],
+        [*col_order_2, "Median Manders coeff", "%.3f" % numpy.median(M2)],
+        [*col_order_2, "Min Manders coeff", "%.3f" % numpy.min(M2)],
+        [*col_order_2, "Max Manders coeff", "%.3f" % numpy.max(M2)],
+    ]
+    return result, M1, M2
+
+# TODO: verify types
+def measure_rwc_coefficient_from_objects(
+    first_pixels: np.ndarray,
+    second_pixels: np.ndarray,
+    labels: ObjectLabelsDense,
+    lrange: np.ndarray,
+    first_image_name: str,
+    second_image_name: str,
+    object_name: str,
+    fi_thresh: Optional[Image2DGrayscale] = None,
+    si_thresh: Optional[Image2DGrayscale] = None,
+    tot_fi_thr: Optional[NDArray[np.int32]] = None,
+    tot_si_thr: Optional[NDArray[np.int32]] = None,
+    combined_thresh: Optional[Image2DGrayscale] = None,
+) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
+    result = []
+    # RWC Coefficient
+    RWC1 = numpy.zeros(len(lrange))
+    RWC2 = numpy.zeros(len(lrange))
+    [Rank1] = numpy.lexsort(([labels], [first_pixels]))
+    [Rank2] = numpy.lexsort(([labels], [second_pixels]))
+    Rank1_U = numpy.hstack(
+        [[False], first_pixels[Rank1[:-1]] != first_pixels[Rank1[1:]]]
+    )
+    Rank2_U = numpy.hstack(
+        [[False], second_pixels[Rank2[:-1]] != second_pixels[Rank2[1:]]]
+    )
+    Rank1_S = numpy.cumsum(Rank1_U)
+    Rank2_S = numpy.cumsum(Rank2_U)
+    Rank_im1 = numpy.zeros(first_pixels.shape, dtype=int)
+    Rank_im2 = numpy.zeros(second_pixels.shape, dtype=int)
+    Rank_im1[Rank1] = Rank1_S
+    Rank_im2[Rank2] = Rank2_S
+    R = max(Rank_im1.max(), Rank_im2.max()) + 1
+    Di = abs(Rank_im1 - Rank_im2)
+    weight = (R - Di) * 1.0 / R
+    weight_thresh = weight[combined_thresh]
+    if combined_thresh is not None and numpy.any(combined_thresh):
+        RWC1 = numpy.array(
+            scipy.ndimage.sum(
+                fi_thresh * weight_thresh, labels[combined_thresh], lrange
+            )
+        ) / numpy.array(tot_fi_thr)
+        RWC2 = numpy.array(
+            scipy.ndimage.sum(
+                si_thresh * weight_thresh, labels[combined_thresh], lrange
+            )
+        ) / numpy.array(tot_si_thr)
+    col_order_1 = [first_image_name, second_image_name, object_name]
+    result += [
+        [ *col_order_1, "Mean RWC coeff", "%.3f" % numpy.mean(RWC1)],
+        [ *col_order_1, "Median RWC coeff", "%.3f" % numpy.median(RWC1)],
+        [ *col_order_1, "Min RWC coeff", "%.3f" % numpy.min(RWC1)],
+        [ *col_order_1, "Max RWC coeff", "%.3f" % numpy.max(RWC1)]
+    ]
+    col_order_2 = [second_image_name, first_image_name, object_name]
+    result += [
+        [ *col_order_2, "Mean RWC coeff", "%.3f" % numpy.mean(RWC2)],
+        [ *col_order_2, "Median RWC coeff", "%.3f" % numpy.median(RWC2)],
+        [ *col_order_2, "Min RWC coeff", "%.3f" % numpy.min(RWC2)],
+        [ *col_order_2, "Max RWC coeff", "%.3f" % numpy.max(RWC2)]
+    ]
+    return result, RWC1, RWC2
+
+# TODO: verify types
+def measure_overlap_coefficient_from_objects(
+    first_pixels: np.ndarray,
+    second_pixels: np.ndarray,
+    labels: ObjectLabelsDense,
+    lrange: np.ndarray,
+    first_image_name: str,
+    second_image_name: str,
+    object_name: str,
+    combined_thresh: Optional[Image2DGrayscale] = None,
+) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    result = []
+    # Overlap Coefficient
+    if combined_thresh is not None and numpy.any(combined_thresh):
+        fpsq = scipy.ndimage.sum(
+            first_pixels[combined_thresh] ** 2,
+            labels[combined_thresh],
+            lrange,
+        )
+        spsq = scipy.ndimage.sum(
+            second_pixels[combined_thresh] ** 2,
+            labels[combined_thresh],
+            lrange,
+        )
+        pdt = numpy.sqrt(numpy.array(fpsq) * numpy.array(spsq))
+
+        overlap = fix(
+            scipy.ndimage.sum(
+                first_pixels[combined_thresh]
+                * second_pixels[combined_thresh],
+                labels[combined_thresh],
+                lrange,
+            )
+            / pdt
+        )
+        K1 = fix(
+            (
+                scipy.ndimage.sum(
+                    first_pixels[combined_thresh]
+                    * second_pixels[combined_thresh],
+                    labels[combined_thresh],
+                    lrange,
+                )
+            )
+            / (numpy.array(fpsq))
+        )
+        K2 = fix(
+            scipy.ndimage.sum(
+                first_pixels[combined_thresh]
+                * second_pixels[combined_thresh],
+                labels[combined_thresh],
+                lrange,
+            )
+            / numpy.array(spsq)
+        )
+    else:
+        overlap = K1 = K2 = numpy.zeros(len(lrange))
+
+    col_order_1 = [first_image_name, second_image_name, object_name]
+    result += [
+        [*col_order_1, "Mean Overlap coeff", "%.3f" % numpy.mean(overlap)],
+        [*col_order_1, "Median Overlap coeff", "%.3f" % numpy.median(overlap)],
+        [*col_order_1, "Min Overlap coeff", "%.3f" % numpy.min(overlap)],
+        [*col_order_1, "Max Overlap coeff", "%.3f" % numpy.max(overlap)],
+    ]
+    return result, overlap, K1, K2
+
+# TODO: verify types
+def measure_costes_coefficient_from_objects(
+    first_pixels: np.ndarray,
+    second_pixels: np.ndarray,
+    labels: ObjectLabelsDense,
+    lrange: np.ndarray,
+    first_image_name: str,
+    second_image_name: str,
+    object_name: str,
+    fi,
+    si,
+    first_image_scale,
+    second_image_scale,
+    costes_method: CostesMethod = CostesMethod.FAST,
+    combined_thresh: Optional[Image2DGrayscale] = None,
+) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
+    result = []
+    # Orthogonal Regression for Costes' automated threshold
+    scale = get_scale(first_image_scale, second_image_scale)
+
+    if costes_method == CostesMethod.FASTER:
+        thr_fi_c, thr_si_c = bisection_costes(fi, si, scale)
+    else:
+        thr_fi_c, thr_si_c = linear_costes(fi, si, scale)
+
+    # Costes' thershold for entire image is applied to each object
+    fi_above_thr = first_pixels > thr_fi_c
+    si_above_thr = second_pixels > thr_si_c
+    combined_thresh_c = fi_above_thr & si_above_thr
+    fi_thresh_c = first_pixels[combined_thresh_c]
+    si_thresh_c = second_pixels[combined_thresh_c]
+    if numpy.any(fi_above_thr):
+        tot_fi_thr_c = scipy.ndimage.sum(
+            first_pixels[first_pixels >= thr_fi_c],
+            labels[first_pixels >= thr_fi_c],
+            lrange,
+        )
+    else:
+        tot_fi_thr_c = numpy.zeros(len(lrange))
+    if numpy.any(si_above_thr):
+        tot_si_thr_c = scipy.ndimage.sum(
+            second_pixels[second_pixels >= thr_si_c],
+            labels[second_pixels >= thr_si_c],
+            lrange,
+        )
+    else:
+        tot_si_thr_c = numpy.zeros(len(lrange))
+
+    # Costes Automated Threshold
+    C1 = numpy.zeros(len(lrange))
+    C2 = numpy.zeros(len(lrange))
+    if numpy.any(combined_thresh_c):
+        C1 = numpy.array(
+            scipy.ndimage.sum(
+                fi_thresh_c, labels[combined_thresh_c], lrange
+            )
+        ) / numpy.array(tot_fi_thr_c)
+        C2 = numpy.array(
+            scipy.ndimage.sum(
+                si_thresh_c, labels[combined_thresh_c], lrange
+            )
+        ) / numpy.array(tot_si_thr_c)
+    col_order_1 = [first_image_name, second_image_name, object_name]
+    result += [
+        [*col_order_1, "Mean Manders coeff (Costes)", "%.3f" % numpy.mean(C1)],
+        [*col_order_1, "Median Manders coeff (Costes)", "%.3f" % numpy.median(C1)],
+        [*col_order_1, "Min Manders coeff (Costes)", "%.3f" % numpy.min(C1)],
+        [*col_order_1, "Max Manders coeff (Costes)", "%.3f" % numpy.max(C1)],
+    ]
+    col_order_2 = [second_image_name, first_image_name, object_name]
+    result += [
+        [*col_order_2, "Mean Manders coeff (Costes)", "%.3f" % numpy.mean(C2)],
+        [*col_order_2, "Median Manders coeff (Costes)", "%.3f" % numpy.median(C2)],
+        [*col_order_2, "Min Manders coeff (Costes)", "%.3f" % numpy.min(C2)],
+        [*col_order_2, "Max Manders coeff (Costes)", "%.3f" % numpy.max(C2)],
+    ]
+
+    return result, C1, C2
+
+# TODO: verify types
 def measure_rwc_coefficient(
         first_image: Image2DGrayscale, 
         second_image: Image2DGrayscale,
@@ -1016,7 +1366,7 @@ def measure_rwc_coefficient(
         tot_fi_thr: Optional[int] = None,
         tot_si_thr: Optional[int] = None,
         combined_thresh: Optional[Image2DGrayscale] = None,
-    ):
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     fi = first_image
     si = second_image
     if fi_thresh is None or si_thresh is None or tot_fi_thr is None or tot_si_thr is None or combined_thresh is None:
@@ -1070,6 +1420,7 @@ def measure_rwc_coefficient(
     ]
     return result, RWC1, RWC2
 
+# TODO: verify types
 def measure_overlap_coefficient(
         first_image: Image2DGrayscale, 
         second_image: Image2DGrayscale,
@@ -1079,7 +1430,7 @@ def measure_overlap_coefficient(
         second_threshold_value: Optional[float] = None,
         fi_thresh: Optional[Image2DGrayscale] = None,
         si_thresh: Optional[Image2DGrayscale] = None,
-    ):
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float, float]:
     fi = first_image
     si = second_image
     if fi_thresh is None or si_thresh is None:
@@ -1109,6 +1460,7 @@ def measure_overlap_coefficient(
     ]
     return result, overlap, K1, K2
 
+# TODO: verify types
 def measure_costes_coefficient(
         first_image: Image2DGrayscale, 
         second_image: Image2DGrayscale,
@@ -1121,7 +1473,7 @@ def measure_costes_coefficient(
         fi_thresh: Optional[Image2DGrayscale] = None,
         si_thresh: Optional[Image2DGrayscale] = None,
         costes_method: CostesMethod = CostesMethod.FAST,
-    ):
+    ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     fi = first_image
     si = second_image
     if fi_thresh is None or si_thresh is None:
@@ -1182,7 +1534,7 @@ def get_scale(scale_1, scale_2):
     else:
         return 255
 
-
+# TODO: verify types
 def bisection_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float=255) -> Tuple[float, float]:
     """
     Finds the Costes Automatic Threshold for colocalization using a bisection algorithm.
@@ -1249,7 +1601,7 @@ def bisection_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float
 
     return thr_fi_c, thr_si_c
 
-
+# TODO: verify types
 def linear_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float=255, costes_method: CostesMethod = CostesMethod.FAST) -> Tuple[float, float]:
     """
     Finds the Costes Automatic Threshold for colocalization using a linear algorithm.
