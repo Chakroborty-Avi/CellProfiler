@@ -597,6 +597,7 @@ You can set a different threshold for each image selected in the module.
                 self.images_list
             )
         return image1_dims
+        
     def prepare_images(self, workspace, first_image_name, second_image_name):
         first_image = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
         second_image = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
@@ -621,7 +622,9 @@ You can set a different threshold for each image selected in the module.
             & (~numpy.isnan(first_pixel_data))
             & (~numpy.isnan(second_pixel_data))
         )
-        return first_pixel_data, second_pixel_data, mask
+        first_threshold_value = self.get_image_threshold_value(first_image_name)
+        second_threshold_value = self.get_image_threshold_value(second_image_name)
+        return first_pixel_data, second_pixel_data, mask, first_threshold_value, second_threshold_value
 
     def prepare_images_objects(self, workspace, first_image_name, second_image_name, object_name):
         first_image = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
@@ -648,6 +651,9 @@ You can set a different threshold for each image selected in the module.
         second_pixels = second_pixels[mask]
         labels = labels[mask]
         first_pixel_data = first_image.pixel_data
+        #
+        # Code below is used for the Costes' automated thresholding
+        #
         first_mask = first_image.mask
         first_pixel_count = numpy.prod(first_image.pixel_data.shape)
         second_pixel_data = second_image.pixel_data
@@ -668,7 +674,17 @@ You can set a different threshold for each image selected in the module.
             & (~numpy.isnan(first_pixel_data))
             & (~numpy.isnan(second_pixel_data))
         )
-        return 
+        #
+        # fi and si are used to obtain the costes threshold values for their respective images
+        #
+        fi = None
+        si = None
+        if mask is not None and numpy.any(mask):
+            fi = first_pixel_data[mask]
+            si = second_pixel_data[mask]
+        first_threshold_value = self.get_image_threshold_value(first_image_name)
+        second_threshold_value = self.get_image_threshold_value(second_image_name)
+        return fi, si, labels, object_count, mask, first_pixels, second_pixels, first_threshold_value, second_threshold_value # original version
     
     def run(self, workspace):
         """Calculate measurements on an image set"""
@@ -680,106 +696,67 @@ You can set a different threshold for each image selected in the module.
         for first_image_name, second_image_name in self.get_image_pairs():
             image_dims = self.verify_image_dims(workspace, first_image_name, second_image_name)
 
-            first_pixel_data, second_pixel_data, mask = self.prepare_images(workspace, first_image_name, second_image_name)
-            kwargs = {}
             if self.wants_images():
-                first_threshold_value = self.get_image_threshold_value(first_image_name)
-                second_threshold_value = self.get_image_threshold_value(second_image_name)
-                measurement_types = []
-                if self.do_corr_and_slope:
-                    measurement_types.append(MeasurementType.CORRELATION)
-                if self.do_manders:
-                    measurement_types.append(MeasurementType.MANDERS)
-                if self.do_rwc:
-                    measurement_types.append(MeasurementType.RWC)
-                if self.do_overlap:
-                    measurement_types.append(MeasurementType.OVERLAP)
-                if self.do_costes:
-                    measurement_types.append(MeasurementType.COSTES)
+                #
+                # Prepare the images for the measurements
+                #
+                first_pixel_data, second_pixel_data, mask, first_threshold_value, second_threshold_value = self.prepare_images(workspace, first_image_name, second_image_name)
+                kwargs = {}
+                measurement_types = self.get_measurement_types()
+                if MeasurementType.COSTES in measurement_types:
                     kwargs["costes_method"] = self.fast_costes.value
                     kwargs["first_image_scale"] = workspace.image_set.get_image(first_image_name).scale
                     kwargs["second_image_scale"] = workspace.image_set.get_image(second_image_name).scale
+                
+                #
+                # Run colocalization measurements on the images
+                #
                 measurements_result, colocalization_measurements = run_image_pair_images(
-                    first_pixel_data, second_pixel_data, first_image_name, second_image_name, mask, first_threshold_value, second_threshold_value, measurement_types, **kwargs
+                    first_pixel_data, 
+                    second_pixel_data, 
+                    first_image_name, 
+                    second_image_name, 
+                    mask, 
+                    first_threshold_value, 
+                    second_threshold_value, 
+                    measurement_types, 
+                    **kwargs
                 )
                 statistics += measurements_result
                 for measurement_name, measurement_value in colocalization_measurements.items():
                     workspace.measurements.add_image_measurement(measurement_name, measurement_value)
 
             if self.wants_objects():
-                
                 for object_name in self.objects_list.value:
-                    """Calculate per-object correlations between intensities in two images"""
-                    first_image = workspace.image_set.get_image(
-                        first_image_name, must_be_grayscale=True
-                    )
-                    second_image = workspace.image_set.get_image(
-                        second_image_name, must_be_grayscale=True
-                    )
-                    objects = workspace.object_set.get_objects(object_name)
+                    kwargs = {}
                     #
-                    # Crop both images to the size of the labels matrix
+                    # Prepare the images and objects for the measurements
                     #
-                    labels = objects.segmented
-                    object_count = objects.count
-                    try:
-                        first_pixels = objects.crop_image_similarly(first_image.pixel_data)
-                        first_mask = objects.crop_image_similarly(first_image.mask)
-                    except ValueError:
-                        first_pixels, m1 = size_similarly(labels, first_image.pixel_data)
-                        first_mask, m1 = size_similarly(labels, first_image.mask)
-                        first_mask[~m1] = False
-                    try:
-                        second_pixels = objects.crop_image_similarly(second_image.pixel_data)
-                        second_mask = objects.crop_image_similarly(second_image.mask)
-                    except ValueError:
-                        second_pixels, m1 = size_similarly(labels, second_image.pixel_data)
-                        second_mask, m1 = size_similarly(labels, second_image.mask)
-                        second_mask[~m1] = False
-                    mask = (labels > 0) & first_mask & second_mask
-                    first_pixels = first_pixels[mask]
-                    second_pixels = second_pixels[mask]
-                    labels = labels[mask]
-                    result = []
-                    first_pixel_data = first_image.pixel_data
-                    first_mask = first_image.mask
-                    first_pixel_count = numpy.prod(first_pixel_data.shape)
-                    second_pixel_data = second_image.pixel_data
-                    second_mask = second_image.mask
-                    second_pixel_count = numpy.prod(second_pixel_data.shape)
-                    #
-                    # Crop the larger image similarly to the smaller one
-                    #
-                    if first_pixel_count < second_pixel_count:
-                        second_pixel_data = first_image.crop_image_similarly(second_pixel_data)
-                        second_mask = first_image.crop_image_similarly(second_mask)
-                    elif second_pixel_count < first_pixel_count:
-                        first_pixel_data = second_image.crop_image_similarly(first_pixel_data)
-                        first_mask = second_image.crop_image_similarly(first_mask)
-                    mask = (
-                        first_mask
-                        & second_mask
-                        & (~numpy.isnan(first_pixel_data))
-                        & (~numpy.isnan(second_pixel_data))
-                    )
-                    first_threshold_value = self.get_image_threshold_value(first_image_name)
-                    second_threshold_value = self.get_image_threshold_value(second_image_name)
-                    measurement_types = []
-                    if self.do_corr_and_slope:
-                        measurement_types.append(MeasurementType.CORRELATION)
-                    if self.do_manders:
-                        measurement_types.append(MeasurementType.MANDERS)
-                    if self.do_rwc:
-                        measurement_types.append(MeasurementType.RWC)
-                    if self.do_overlap:
-                        measurement_types.append(MeasurementType.OVERLAP)
-                    if self.do_costes:
-                        measurement_types.append(MeasurementType.COSTES)
+                    fi, si, labels, object_count, mask, first_pixels, second_pixels, first_threshold_value, second_threshold_value = self.prepare_images_objects(workspace, first_image_name, second_image_name, object_name)
+                    measurement_types = self.get_measurement_types()
+                    if MeasurementType.COSTES in measurement_types:
                         kwargs["costes_method"] = self.fast_costes.value
                         kwargs["first_image_scale"] = workspace.image_set.get_image(first_image_name).scale
                         kwargs["second_image_scale"] = workspace.image_set.get_image(second_image_name).scale
+
+                    #
+                    # Run colocalization measurements on the objects
+                    #
                     measurements_result, colocalization_measurements = run_image_pair_objects(
-                        first_pixel_data, second_pixel_data, first_pixels, second_pixels, labels, object_count, first_image_name, second_image_name, object_name, mask, first_threshold_value, second_threshold_value, measurement_types, **kwargs
+                        first_pixels, 
+                        second_pixels, 
+                        labels, 
+                        object_count, 
+                        first_image_name, 
+                        second_image_name, 
+                        object_name, 
+                        mask, 
+                        first_threshold_value, 
+                        second_threshold_value, 
+                        fi, 
+                        si, 
+                        measurement_types, 
+                        **kwargs
                     )
                     statistics += measurements_result
                     for measurement_name, measurement_value in colocalization_measurements.items():
@@ -791,6 +768,20 @@ You can set a different threshold for each image selected in the module.
             workspace.display_data.statistics = statistics
             workspace.display_data.col_labels = col_labels
             workspace.display_data.dimensions = image_dims
+            
+    def get_measurement_types(self):
+        measurement_types = []
+        if self.do_corr_and_slope:
+            measurement_types.append(MeasurementType.CORRELATION)
+        if self.do_manders:
+            measurement_types.append(MeasurementType.MANDERS)
+        if self.do_rwc:
+            measurement_types.append(MeasurementType.RWC)
+        if self.do_overlap:
+            measurement_types.append(MeasurementType.OVERLAP)
+        if self.do_costes:
+            measurement_types.append(MeasurementType.COSTES)
+        return measurement_types
 
     def display(self, workspace, figure):
         statistics = workspace.display_data.statistics

@@ -19,12 +19,13 @@ from cellprofiler_library.functions.segmentation import cast_labels_to_label_set
 
 from cellprofiler_library.opts.objectsizeshapefeatures import ObjectSizeShapeFeatures
 from scipy.linalg import lstsq
-from cellprofiler_library.types import Image2DGrayscale, ObjectLabelsDense
+from cellprofiler_library.types import ImageGrayscale, ObjectLabelsDense
 from typing import Optional, Tuple, List, Sequence
 from cellprofiler_library.opts.measurecolocalization import CostesMethod
 from centrosome.cpmorphology import fixup_scipy_ndimage_result as fix
 import scipy.ndimage
 from numpy.typing import NDArray
+from pydantic import validate_call, ConfigDict
 
 
 
@@ -908,14 +909,14 @@ def measure_object_size_shape(
 ########################################################
 # TODO: Decide if the code for image and object should be combined into a single function
 
-# TODO: verify types
-# TODO: move to image_processing.py
+# TODO: move to image_processing.py? the inputs are not exactly images. Instead they're individual pixels flattened using mask before the fn is called
+@validate_call(config=ConfigDict(arbitrary_types_allowed=True))
 def get_thresholded_images_and_counts(
-    first_image: Image2DGrayscale, 
-    second_image: Image2DGrayscale,
+    first_image: NDArray[np.float64], 
+    second_image: NDArray[np.float64],
     first_threshold_value: float,
     second_threshold_value: float,
-) -> Tuple[float, float, NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.float64], NDArray[numpy.bool_]]:
+) -> Tuple[float, float, NDArray[numpy.float64], NDArray[numpy.float64], float, float, NDArray[numpy.bool_]]:
     fi = first_image
     si = second_image
     thr_fi = first_threshold_value * numpy.max(fi) / 100
@@ -925,16 +926,23 @@ def get_thresholded_images_and_counts(
     si_thresh = si[combined_thresh]
     tot_fi_thr = fi[(fi > thr_fi)].sum()
     tot_si_thr = si[(si > thr_si)].sum()
+
+    thr_fi = float(thr_fi)
+    thr_si = float(thr_si)
+    fi_thresh = fi_thresh.astype(np.float64)
+    si_thresh = si_thresh.astype(np.float64)
+    tot_fi_thr = float(tot_fi_thr)
+    tot_si_thr = float(tot_si_thr)
     return thr_fi, thr_si, fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh
 
-# TODO: verify types
+
 def get_thresholded_images_and_counts_from_objects(
-    first_pixels: np.ndarray,
-    second_pixels: np.ndarray,
+    first_pixels: NDArray[np.float64],
+    second_pixels: NDArray[np.float64],
     im1_threshold: float,
     im2_threshold: float,
-    labels: ObjectLabelsDense
-) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.int32], NDArray[np.int32], NDArray[np.bool_]]:
+    labels: NDArray[np.int32]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
     lrange = numpy.arange(labels.max(), dtype=numpy.int32) + 1
     # Threshold as percentage of maximum intensity of objects in each channel
     tff = (im1_threshold / 100) * fix(
@@ -959,15 +967,15 @@ def get_thresholded_images_and_counts_from_objects(
     )
     fi_thresh = fi_thresh.astype(numpy.float64)
     si_thresh = si_thresh.astype(numpy.float64)
-    tot_fi_thr = tot_fi_thr.astype(numpy.int32)
-    tot_si_thr = tot_si_thr.astype(numpy.int32)
+    tot_fi_thr = tot_fi_thr.astype(numpy.float64)
+    tot_si_thr = tot_si_thr.astype(numpy.float64)
     combined_thresh = combined_thresh.astype(numpy.bool_)
     return fi_thresh, si_thresh, tot_fi_thr, tot_si_thr, combined_thresh
 
-# TODO: verify types
+
 def measure_correlation_and_slope(
-        first_image: Image2DGrayscale, 
-        second_image: Image2DGrayscale,
+        first_image: NDArray[np.float64], 
+        second_image: NDArray[np.float64],
         first_image_name: str, 
         second_image_name: str, 
     ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
@@ -1001,18 +1009,18 @@ def measure_correlation_and_slope(
     ]
     return result, corr, slope
 
-# TODO: verify types
+
 def measure_manders_coefficient(
-        first_image: Image2DGrayscale, 
-        second_image: Image2DGrayscale,
+        first_image: NDArray[np.float64], 
+        second_image: NDArray[np.float64],
         first_image_name: str, 
         second_image_name: str, 
         first_threshold_value: Optional[float] = None,
         second_threshold_value: Optional[float] = None,
-        fi_thresh: Optional[Image2DGrayscale] = None,
-        si_thresh: Optional[Image2DGrayscale] = None,
-        tot_fi_thr: Optional[int] = None,
-        tot_si_thr: Optional[int] = None,
+        fi_thresh: Optional[NDArray[np.float64]] = None,
+        si_thresh: Optional[NDArray[np.float64]] = None,
+        tot_fi_thr: Optional[float] = None,
+        tot_si_thr: Optional[float] = None,
     ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     if fi_thresh is None or si_thresh is None or tot_fi_thr is None or tot_si_thr is None:
         assert first_threshold_value is not None
@@ -1049,11 +1057,11 @@ def measure_manders_coefficient(
     ]
     return result, M1, M2
 
-# TODO: verify types
+
 def measure_correlation_and_slope_from_objects(
-    first_pixels: np.ndarray,
-    second_pixels: np.ndarray,
-    labels: ObjectLabelsDense,
+    first_pixels: NDArray[np.float64],
+    second_pixels: NDArray[np.float64],
+    labels: NDArray[np.int32],
     lrange: np.ndarray,
     first_image_name: str,
     second_image_name: str,
@@ -1102,18 +1110,18 @@ def measure_correlation_and_slope_from_objects(
     ]
     return result, corr
 
-# TODO: verify types
+
 def measure_manders_coefficient_from_objects(
-    labels: ObjectLabelsDense,
+    labels: NDArray[np.int32],
     lrange: np.ndarray,
     first_image_name: str,
     second_image_name: str,
     object_name: str,
-    fi_thresh: Optional[Image2DGrayscale] = None,
-    si_thresh: Optional[Image2DGrayscale] = None,
-    tot_fi_thr: Optional[NDArray[np.int32]] = None,
-    tot_si_thr: Optional[NDArray[np.int32]] = None,
-    combined_thresh: Optional[Image2DGrayscale] = None,
+    fi_thresh: Optional[NDArray[np.float64]] = None,
+    si_thresh: Optional[NDArray[np.float64]] = None,
+    tot_fi_thr: Optional[NDArray[np.float64]] = None,
+    tot_si_thr: Optional[NDArray[np.float64]] = None,
+    combined_thresh: Optional[NDArray[np.bool_]] = None,
     ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
     result = []
     # Manders Coefficient
@@ -1143,20 +1151,20 @@ def measure_manders_coefficient_from_objects(
     ]
     return result, M1, M2
 
-# TODO: verify types
+
 def measure_rwc_coefficient_from_objects(
-    first_pixels: np.ndarray,
-    second_pixels: np.ndarray,
-    labels: ObjectLabelsDense,
+    first_pixels: NDArray[np.float64],
+    second_pixels: NDArray[np.float64],
+    labels: NDArray[np.int32],
     lrange: np.ndarray,
     first_image_name: str,
     second_image_name: str,
     object_name: str,
-    fi_thresh: Optional[Image2DGrayscale] = None,
-    si_thresh: Optional[Image2DGrayscale] = None,
-    tot_fi_thr: Optional[NDArray[np.int32]] = None,
-    tot_si_thr: Optional[NDArray[np.int32]] = None,
-    combined_thresh: Optional[Image2DGrayscale] = None,
+    fi_thresh: Optional[NDArray[np.float64]] = None,
+    si_thresh: Optional[NDArray[np.float64]] = None,
+    tot_fi_thr: Optional[NDArray[np.float64]] = None,
+    tot_si_thr: Optional[NDArray[np.float64]] = None,
+    combined_thresh: Optional[NDArray[np.bool_]] = None,
 ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
     result = []
     # RWC Coefficient
@@ -1207,16 +1215,16 @@ def measure_rwc_coefficient_from_objects(
     ]
     return result, RWC1, RWC2
 
-# TODO: verify types
+
 def measure_overlap_coefficient_from_objects(
-    first_pixels: np.ndarray,
-    second_pixels: np.ndarray,
-    labels: ObjectLabelsDense,
+    first_pixels: NDArray[np.float64],
+    second_pixels: NDArray[np.float64],
+    labels: NDArray[np.int32],
     lrange: np.ndarray,
     first_image_name: str,
     second_image_name: str,
     object_name: str,
-    combined_thresh: Optional[Image2DGrayscale] = None,
+    combined_thresh: Optional[NDArray[np.bool_]] = None,
 ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     result = []
     # Overlap Coefficient
@@ -1274,22 +1282,22 @@ def measure_overlap_coefficient_from_objects(
     ]
     return result, overlap, K1, K2
 
-# TODO: verify types
+
 def measure_costes_coefficient_from_objects(
-    first_pixels: np.ndarray,
-    second_pixels: np.ndarray,
-    labels: ObjectLabelsDense,
+    first_pixels: NDArray[np.float64],
+    second_pixels: NDArray[np.float64],
+    labels: NDArray[np.int32],
     lrange: np.ndarray,
     first_image_name: str,
     second_image_name: str,
     object_name: str,
-    fi,
-    si,
+    fi: NDArray[numpy.float64],
+    si: NDArray[numpy.float64],
     first_image_scale,
     second_image_scale,
     costes_method: CostesMethod = CostesMethod.FAST,
-    combined_thresh: Optional[Image2DGrayscale] = None,
 ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
+    # first_pixels and second_pixels are obtained from the objects 
     result = []
     # Orthogonal Regression for Costes' automated threshold
     scale = get_scale(first_image_scale, second_image_scale)
@@ -1353,19 +1361,19 @@ def measure_costes_coefficient_from_objects(
 
     return result, C1, C2
 
-# TODO: verify types
+
 def measure_rwc_coefficient(
-        first_image: Image2DGrayscale, 
-        second_image: Image2DGrayscale,
+        first_image: NDArray[np.float64], 
+        second_image: NDArray[np.float64],
         first_image_name: str, 
         second_image_name: str, 
         first_threshold_value: Optional[float] = None,
         second_threshold_value: Optional[float] = None,
-        fi_thresh: Optional[Image2DGrayscale] = None,
-        si_thresh: Optional[Image2DGrayscale] = None,
-        tot_fi_thr: Optional[int] = None,
-        tot_si_thr: Optional[int] = None,
-        combined_thresh: Optional[Image2DGrayscale] = None,
+        fi_thresh: Optional[NDArray[np.float64]] = None,
+        si_thresh: Optional[NDArray[np.float64]] = None,
+        tot_fi_thr: Optional[float] = None,
+        tot_si_thr: Optional[float] = None,
+        combined_thresh: Optional[NDArray[np.bool_]] = None,
     ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
     fi = first_image
     si = second_image
@@ -1420,27 +1428,13 @@ def measure_rwc_coefficient(
     ]
     return result, RWC1, RWC2
 
-# TODO: verify types
+
 def measure_overlap_coefficient(
-        first_image: Image2DGrayscale, 
-        second_image: Image2DGrayscale,
         first_image_name: str, 
-        second_image_name: str, 
-        first_threshold_value: Optional[float] = None,
-        second_threshold_value: Optional[float] = None,
-        fi_thresh: Optional[Image2DGrayscale] = None,
-        si_thresh: Optional[Image2DGrayscale] = None,
+        second_image_name: str,
+        fi_thresh: NDArray[np.float64],
+        si_thresh: NDArray[np.float64],
     ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float, float]:
-    fi = first_image
-    si = second_image
-    if fi_thresh is None or si_thresh is None:
-        assert first_threshold_value is not None
-        assert second_threshold_value is not None
-        _, _, fi_thresh, si_thresh, _, _, _ = get_thresholded_images_and_counts(
-            first_image, second_image, first_threshold_value, second_threshold_value
-        )
-    assert fi_thresh is not None
-    assert si_thresh is not None
     result = []
     # Overlap Coefficient
     overlap = 0
@@ -1460,28 +1454,24 @@ def measure_overlap_coefficient(
     ]
     return result, overlap, K1, K2
 
-# TODO: verify types
+
 def measure_costes_coefficient(
-        first_image: Image2DGrayscale, 
-        second_image: Image2DGrayscale,
+        first_image: NDArray[np.float64], 
+        second_image: NDArray[np.float64],
         first_image_name: str, 
         second_image_name: str, 
+        fi_thresh: NDArray[np.float64],
+        si_thresh: NDArray[np.float64],
         first_image_scale: Optional[float] = None,
         second_image_scale: Optional[float] = None,
-        first_threshold_value: Optional[float] = None,
-        second_threshold_value: Optional[float] = None,
-        fi_thresh: Optional[Image2DGrayscale] = None,
-        si_thresh: Optional[Image2DGrayscale] = None,
+        
         costes_method: CostesMethod = CostesMethod.FAST,
     ) -> Tuple[List[Tuple[str, str, str, str, str]], float, float]:
+    #
+    # Find the Costes threshold for each image
+    #
     fi = first_image
     si = second_image
-    if fi_thresh is None or si_thresh is None:
-        assert first_threshold_value is not None
-        assert second_threshold_value is not None
-        _, _, fi_thresh, si_thresh, _, _, _ = get_thresholded_images_and_counts(
-            first_image, second_image, first_threshold_value, second_threshold_value
-        )
     assert fi_thresh is not None
     assert si_thresh is not None
     result = []
@@ -1534,8 +1524,8 @@ def get_scale(scale_1, scale_2):
     else:
         return 255
 
-# TODO: verify types
-def bisection_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float=255) -> Tuple[float, float]:
+
+def bisection_costes(fi: NDArray[numpy.float64], si: NDArray[numpy.float64], scale_max:float=255) -> Tuple[float, float]:
     """
     Finds the Costes Automatic Threshold for colocalization using a bisection algorithm.
     Candidate thresholds are selected from within a window of possible intensities,
@@ -1601,8 +1591,8 @@ def bisection_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float
 
     return thr_fi_c, thr_si_c
 
-# TODO: verify types
-def linear_costes(fi: Image2DGrayscale, si: Image2DGrayscale, scale_max:float=255, costes_method: CostesMethod = CostesMethod.FAST) -> Tuple[float, float]:
+
+def linear_costes(fi: NDArray[numpy.float64], si: NDArray[numpy.float64], scale_max:float=255, costes_method: CostesMethod = CostesMethod.FAST) -> Tuple[float, float]:
     """
     Finds the Costes Automatic Threshold for colocalization using a linear algorithm.
     Candiate thresholds are gradually decreased until Pearson R falls below 0.
