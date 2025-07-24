@@ -91,7 +91,7 @@ def test_load_v2():
         == cellprofiler.modules.measurecolocalization.M_IMAGES_AND_OBJECTS
     )
     assert len(module.images_list.value) == 2
-    assert module.thr == 15.0
+    assert module.threshold_percentage == 15.0
     for name in module.images_list.value:
         assert name in ["DNA", "Cytoplasm"]
 
@@ -120,7 +120,7 @@ def test_load_v3():
         == cellprofiler.modules.measurecolocalization.M_IMAGES_AND_OBJECTS
     )
     assert len(module.images_list.value) == 2
-    assert module.thr == 25.0
+    assert module.threshold_percentage == 25.0
     for name in module.images_list.value:
         assert name in ["DNA", "Cytoplasm"]
 
@@ -149,7 +149,7 @@ def test_load_v5():
         == cellprofiler.modules.measurecolocalization.M_IMAGES_AND_OBJECTS
     )
     assert len(module.images_list.value) == 2
-    assert module.thr == 15.0
+    assert module.threshold_percentage == 15.0
     for name in module.images_list.value:
         assert name in ["OrigStain1", "OrigStain2"]
     assert module.wants_channel_thresholds.value is False
@@ -178,7 +178,7 @@ def test_load_v6():
         == cellprofiler.modules.measurecolocalization.M_IMAGES
     )
     assert len(module.images_list.value) == 2
-    assert module.thr == 15.0
+    assert module.threshold_percentage == 15.0
     for name in module.images_list.value:
         assert name in ["OrigStain1", "OrigStain2"]
 

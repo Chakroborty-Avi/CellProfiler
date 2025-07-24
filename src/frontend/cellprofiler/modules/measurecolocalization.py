@@ -171,7 +171,7 @@ Select the objects to be measured.""",
 
         self.thresholds_list = []
 
-        self.thr = Float(
+        self.threshold_percentage = Float(
             "Set threshold as percentage of maximum intensity for the images",
             15,
             minval=0,
@@ -432,7 +432,7 @@ You can set a different threshold for each image selected in the module.
         """Return the settings to be saved in the pipeline"""
         result = [
             self.images_list,
-            self.thr
+            self.threshold_percentage
             ]
         result += [self.wants_channel_thresholds, self.thresholds_count]
         for threshold in self.thresholds_list:
@@ -466,7 +466,7 @@ You can set a different threshold for each image selected in the module.
         result = [
             self.images_list,
             self.spacer,
-            self.thr,
+            self.threshold_percentage,
             self.wants_channel_thresholds,
         ]
         if self.wants_channel_thresholds.value:
@@ -510,7 +510,7 @@ You can set a different threshold for each image selected in the module.
         """Return the settings to be displayed in the help menu"""
         help_settings = [
             self.images_or_objects,
-            self.thr,
+            self.threshold_percentage,
             self.wants_channel_thresholds,
             self.wants_threshold_visualization,
             self.threshold_visualization_list,
@@ -531,7 +531,7 @@ You can set a different threshold for each image selected in the module.
         # 4 fixed settings + <n settings for threshold> + 12 fixed settings
         fixed_settings_set_1 = (
             self.images_list,
-            self.thr,
+            self.threshold_percentage,
             self.wants_channel_thresholds,
             self.thresholds_count
 
@@ -599,92 +599,92 @@ You can set a different threshold for each image selected in the module.
         return image1_dims
         
     def prepare_images(self, workspace, first_image_name, second_image_name):
-        first_image = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
-        second_image = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
+        im1 = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
+        im2 = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
         
-        first_pixel_count = numpy.prod(first_image.pixel_data.shape)
-        second_pixel_count = numpy.prod(second_image.pixel_data.shape)
+        im1_pixel_count = numpy.prod(im1.pixel_data.shape)
+        im2_pixel_count = numpy.prod(im2.pixel_data.shape)
         
-        first_mask = first_image.mask
-        second_mask = second_image.mask
+        im1_mask = im1.mask
+        im2_mask = im2.mask
         
-        first_pixel_data = first_image.pixel_data
-        second_pixel_data = second_image.pixel_data
-        if first_pixel_count < second_pixel_count:
-            second_pixel_data = first_image.crop_image_similarly(second_image.pixel_data)
-            second_mask = first_image.crop_image_similarly(second_image.mask)
-        elif second_pixel_count < first_pixel_count:
-            first_pixel_data = second_image.crop_image_similarly(first_image.pixel_data)
-            first_mask = second_image.crop_image_similarly(first_image.mask)
+        im1_pixel_data = im1.pixel_data
+        im2_pixel_data = im2.pixel_data
+        if im1_pixel_count < im2_pixel_count:
+            im2_pixel_data = im1.crop_image_similarly(im2.pixel_data)
+            im2_mask = im1.crop_image_similarly(im2.mask)
+        elif im2_pixel_count < im1_pixel_count:
+            im1_pixel_data = im2.crop_image_similarly(im1.pixel_data)
+            im1_mask = im2.crop_image_similarly(im1.mask)
         mask = (
-            first_mask
-            & second_mask
-            & (~numpy.isnan(first_pixel_data))
-            & (~numpy.isnan(second_pixel_data))
+            im1_mask
+            & im2_mask
+            & (~numpy.isnan(im1_pixel_data))
+            & (~numpy.isnan(im2_pixel_data))
         )
-        first_threshold_value = self.get_image_threshold_value(first_image_name)
-        second_threshold_value = self.get_image_threshold_value(second_image_name)
-        return first_pixel_data, second_pixel_data, mask, first_threshold_value, second_threshold_value
+        im1_thr_percentage = self.get_image_threshold_value(first_image_name)
+        im2_thr_percentage = self.get_image_threshold_value(second_image_name)
+        return im1_pixel_data, im2_pixel_data, mask, im1_thr_percentage, im2_thr_percentage
 
     def prepare_images_objects(self, workspace, first_image_name, second_image_name, object_name):
-        first_image = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
-        second_image = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
+        im1 = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
+        im2 = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
         objects = workspace.object_set.get_objects(object_name)
         labels = objects.segmented
         object_count = objects.count
         try:
-            first_pixels = objects.crop_image_similarly(first_image.pixel_data)
-            first_mask = objects.crop_image_similarly(first_image.mask)
+            im1_pixels = objects.crop_image_similarly(im1.pixel_data)
+            im1_mask = objects.crop_image_similarly(im1.mask)
         except ValueError:
-            first_pixels, m1 = size_similarly(labels, first_image.pixel_data)
-            first_mask, m1 = size_similarly(labels, first_image.mask)
-            first_mask[~m1] = False
+            im1_pixels, m1 = size_similarly(labels, im1.pixel_data)
+            im1_mask, m1 = size_similarly(labels, im1.mask)
+            im1_mask[~m1] = False
         try:
-            second_pixels = objects.crop_image_similarly(second_image.pixel_data)
-            second_mask = objects.crop_image_similarly(second_image.mask)
+            im2_pixels = objects.crop_image_similarly(im2.pixel_data)
+            im2_mask = objects.crop_image_similarly(im2.mask)
         except ValueError:
-            second_pixels, m1 = size_similarly(labels, second_image.pixel_data)
-            second_mask, m1 = size_similarly(labels, second_image.mask)
-            second_mask[~m1] = False
-        mask = (labels > 0) & first_mask & second_mask
-        first_pixels = first_pixels[mask]
-        second_pixels = second_pixels[mask]
+            im2_pixels, m1 = size_similarly(labels, im2.pixel_data)
+            im2_mask, m1 = size_similarly(labels, im2.mask)
+            im2_mask[~m1] = False
+        mask = (labels > 0) & im1_mask & im2_mask
+        im1_pixels = im1_pixels[mask]
+        im2_pixels = im2_pixels[mask]
         labels = labels[mask]
-        first_pixel_data = first_image.pixel_data
+        im1_pixel_data = im1.pixel_data
         #
         # Code below is used for the Costes' automated thresholding
         #
-        first_mask = first_image.mask
-        first_pixel_count = numpy.prod(first_image.pixel_data.shape)
-        second_pixel_data = second_image.pixel_data
-        second_mask = second_image.mask
-        second_pixel_count = numpy.prod(second_image.pixel_data.shape)
+        im1_mask = im1.mask
+        im1_pixel_count = numpy.prod(im1.pixel_data.shape)
+        im2_pixel_data = im2.pixel_data
+        im2_mask = im2.mask
+        im2_pixel_count = numpy.prod(im2.pixel_data.shape)
         #
         # Crop the larger image similarly to the smaller one
         #
-        if first_pixel_count < second_pixel_count:
-            second_pixel_data = first_image.crop_image_similarly(second_pixel_data)
-            second_mask = first_image.crop_image_similarly(second_mask)
-        elif second_pixel_count < first_pixel_count:
-            first_pixel_data = second_image.crop_image_similarly(first_pixel_data)
-            first_mask = second_image.crop_image_similarly(first_mask)
+        if im1_pixel_count < im2_pixel_count:
+            im2_pixel_data = im1.crop_image_similarly(im2_pixel_data)
+            im2_mask = im1.crop_image_similarly(im2_mask)
+        elif im2_pixel_count < im1_pixel_count:
+            im1_pixel_data = im2.crop_image_similarly(im1_pixel_data)
+            im1_mask = im2.crop_image_similarly(im1_mask)
         mask = (
-            first_mask
-            & second_mask
-            & (~numpy.isnan(first_pixel_data))
-            & (~numpy.isnan(second_pixel_data))
+            im1_mask
+            & im2_mask
+            & (~numpy.isnan(im1_pixel_data))
+            & (~numpy.isnan(im2_pixel_data))
         )
         #
         # fi and si are used to obtain the costes threshold values for their respective images
         #
-        fi = None
-        si = None
+        im1_costes_pixels = None
+        im2_costes_pixels = None
         if mask is not None and numpy.any(mask):
-            fi = first_pixel_data[mask]
-            si = second_pixel_data[mask]
-        first_threshold_value = self.get_image_threshold_value(first_image_name)
-        second_threshold_value = self.get_image_threshold_value(second_image_name)
-        return fi, si, labels, object_count, mask, first_pixels, second_pixels, first_threshold_value, second_threshold_value # original version
+            im1_costes_pixels = im1_pixel_data[mask]
+            im2_costes_pixels = im2_pixel_data[mask]
+        im1_thr_percentage = self.get_image_threshold_value(first_image_name)
+        im2_thr_percentage = self.get_image_threshold_value(second_image_name)
+        return im1_costes_pixels, im2_costes_pixels, labels, object_count, mask, im1_pixels, im2_pixels, im1_thr_percentage, im2_thr_percentage
     
     def run(self, workspace):
         """Calculate measurements on an image set"""
@@ -693,32 +693,32 @@ You can set a different threshold for each image selected in the module.
         image_dims = None
         if len(self.images_list.value) < 2:
             raise ValueError("At least 2 images must be selected for analysis.")
-        for first_image_name, second_image_name in self.get_image_pairs():
-            image_dims = self.verify_image_dims(workspace, first_image_name, second_image_name)
+        for im1_name, im2_name in self.get_image_pairs():
+            image_dims = self.verify_image_dims(workspace, im1_name, im2_name)
 
             if self.wants_images():
                 #
                 # Prepare the images for the measurements
                 #
-                first_pixel_data, second_pixel_data, mask, first_threshold_value, second_threshold_value = self.prepare_images(workspace, first_image_name, second_image_name)
+                im1_pixel_data, im2_pixel_data, mask, im1_thr_percentage, im2_thr_percentage = self.prepare_images(workspace, im1_name, im2_name)
                 kwargs = {}
                 measurement_types = self.get_measurement_types()
                 if MeasurementType.COSTES in measurement_types:
                     kwargs["costes_method"] = self.fast_costes.value
-                    kwargs["first_image_scale"] = workspace.image_set.get_image(first_image_name).scale
-                    kwargs["second_image_scale"] = workspace.image_set.get_image(second_image_name).scale
+                    kwargs["first_image_scale"] = workspace.image_set.get_image(im1_name).scale
+                    kwargs["second_image_scale"] = workspace.image_set.get_image(im2_name).scale
                 
                 #
                 # Run colocalization measurements on the images
                 #
                 measurements_result, colocalization_measurements = run_image_pair_images(
-                    first_pixel_data, 
-                    second_pixel_data, 
-                    first_image_name, 
-                    second_image_name, 
+                    im1_pixel_data, 
+                    im2_pixel_data, 
+                    im1_name, 
+                    im2_name, 
                     mask, 
-                    first_threshold_value, 
-                    second_threshold_value, 
+                    im1_thr_percentage, 
+                    im2_thr_percentage, 
                     measurement_types, 
                     **kwargs
                 )
@@ -732,12 +732,23 @@ You can set a different threshold for each image selected in the module.
                     #
                     # Prepare the images and objects for the measurements
                     #
-                    fi, si, labels, object_count, mask, first_pixels, second_pixels, first_threshold_value, second_threshold_value = self.prepare_images_objects(workspace, first_image_name, second_image_name, object_name)
+                    (
+                        first_image_costes_pixels, 
+                        second_image_costes_pixels, 
+                        labels, 
+                        object_count, 
+                        mask, 
+                        first_pixels, 
+                        second_pixels, 
+                        im1_thr_percentage, 
+                        im2_thr_percentage
+                    ) = self.prepare_images_objects(workspace, im1_name, im2_name, object_name)
+
                     measurement_types = self.get_measurement_types()
                     if MeasurementType.COSTES in measurement_types:
                         kwargs["costes_method"] = self.fast_costes.value
-                        kwargs["first_image_scale"] = workspace.image_set.get_image(first_image_name).scale
-                        kwargs["second_image_scale"] = workspace.image_set.get_image(second_image_name).scale
+                        kwargs["first_image_scale"] = workspace.image_set.get_image(im1_name).scale
+                        kwargs["second_image_scale"] = workspace.image_set.get_image(im2_name).scale
 
                     #
                     # Run colocalization measurements on the objects
@@ -747,14 +758,14 @@ You can set a different threshold for each image selected in the module.
                         second_pixels, 
                         labels, 
                         object_count, 
-                        first_image_name, 
-                        second_image_name, 
+                        im1_name, 
+                        im2_name, 
                         object_name, 
                         mask, 
-                        first_threshold_value, 
-                        second_threshold_value, 
-                        fi, 
-                        si, 
+                        im1_thr_percentage, 
+                        im2_thr_percentage, 
+                        first_image_costes_pixels, 
+                        second_image_costes_pixels, 
                         measurement_types, 
                         **kwargs
                     )
@@ -909,7 +920,7 @@ You can set a different threshold for each image selected in the module.
             for threshold in self.thresholds_list:
                 if threshold.image_name == image_name:
                     return threshold.threshold_for_channel.value
-        return self.thr.value
+        return self.threshold_percentage.value
 
     def get_measurement_columns(self, pipeline):
         """Return column definitions for all measurements made by this module"""
