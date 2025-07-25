@@ -711,7 +711,7 @@ You can set a different threshold for each image selected in the module.
                 #
                 # Run colocalization measurements on the images
                 #
-                measurements_result, colocalization_measurements = run_image_pair_images(
+                colocalization_measurements, measurements_summary = run_image_pair_images(
                     im1_pixel_data, 
                     im2_pixel_data, 
                     im1_name, 
@@ -722,7 +722,7 @@ You can set a different threshold for each image selected in the module.
                     measurement_types, 
                     **kwargs
                 )
-                statistics += measurements_result
+                statistics += measurements_summary
                 for measurement_name, measurement_value in colocalization_measurements.items():
                     workspace.measurements.add_image_measurement(measurement_name, measurement_value)
 
@@ -753,7 +753,7 @@ You can set a different threshold for each image selected in the module.
                     #
                     # Run colocalization measurements on the objects
                     #
-                    measurements_result, colocalization_measurements = run_image_pair_objects(
+                    colocalization_measurements, measurements_summary = run_image_pair_objects(
                         first_pixels, 
                         second_pixels, 
                         labels, 
@@ -769,7 +769,7 @@ You can set a different threshold for each image selected in the module.
                         measurement_types, 
                         **kwargs
                     )
-                    statistics += measurements_result
+                    statistics += measurements_summary
                     for measurement_name, measurement_value in colocalization_measurements.items():
                         workspace.measurements.add_measurement(object_name, measurement_name, measurement_value)
 

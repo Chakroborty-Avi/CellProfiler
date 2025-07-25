@@ -907,13 +907,14 @@ def measure_object_size_shape(
 ########################################################
 # MeasureColocalization
 ########################################################
-# TODO: Decide if the code for image and object should be combined into a single function
 
-# TODO: move to image_processing.py? the inputs are not exactly images. Instead they're individual pixels flattened using mask before the fn is called
-
-IMAGE_NAME_1 = "image1"
-IMAGE_NAME_2 = "image2"
-OBJECT_NAME = "object"
+def get_sum_per_object(im_pixels, mask, labels, lrange):
+    S = np.array(
+        scipy.ndimage.sum(
+            im_pixels, labels[mask], lrange
+        )
+    )
+    return S
 
 def get_threshold_values_for_objects(image_threshold_percentage, pixels, labels, lrange=None) -> NDArray[np.float64]:
     lrange = lrange if lrange is not None else numpy.arange(labels.max(), dtype=numpy.int32) + 1
@@ -936,7 +937,6 @@ def get_threshold_sum_and_mask(image_threshold_percentage, pixels, labels, lrang
     thresholded_sum = get_thresholded_sum(pixels, object_threshold_values, labels, lrange) # tot_fi_thr / tot_si_thr
     threshold_mask = (pixels >= object_threshold_values[labels - 1])
     return thresholded_sum, threshold_mask
-
 
 def get_thresholded_images_and_counts(
     im1_pixels: NDArray[np.float64],
@@ -962,14 +962,13 @@ def get_thresholded_images_and_counts(
         thr_mask_intersection
     )
 
-
+#
+# Correlation and Slope
+#
 def measure_correlation_and_slope(
         im1_pixels: NDArray[np.float64], 
         im2_pixels: NDArray[np.float64],
-        im1_name: str = IMAGE_NAME_1, 
-        im2_name: str = IMAGE_NAME_2, 
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], np.float64, np.float64]:
-    result = []
+    ) -> Tuple[np.float64, np.float64]:
     #
     # Perform the correlation, which returns:
     # [ [ii, ij],
@@ -987,29 +986,15 @@ def measure_correlation_and_slope(
     coeffs = least_squares_solution[0]
     slope = coeffs[0]
     assert slope is not None
-    result += [
-        [
-            im1_name,
-            im2_name,
-            "-",
-            "Correlation",
-            "%.3f" % corr,
-        ],
-        [im1_name, im2_name, "-", "Slope", "%.3f" % slope],
-    ]
-    return result, corr, slope
 
+    return corr, slope
 
 def measure_correlation_and_slope_from_objects(
     im1_pixels: NDArray[np.float64],
     im2_pixels: NDArray[np.float64],
     labels: NDArray[np.int32],
-    lrange: np.ndarray,
-    im1_name: str = IMAGE_NAME_1, 
-    im2_name: str = IMAGE_NAME_2, 
-    object_name: str = OBJECT_NAME,
-) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64]]:
-    result = []
+    lrange: np.ndarray
+) -> NDArray[np.float64]:
     #
     # The correlation is sum((x-mean(x))(y-mean(y)) /
     #                         ((n-1) * std(x) *std(y)))
@@ -1043,81 +1028,60 @@ def measure_correlation_and_slope_from_objects(
     )
     # Explicitly set the correlation to NaN for masked objects
     corr[scipy.ndimage.sum(1, labels, lrange) == 0] = numpy.NaN
-    col_order_1 = [im1_name, im2_name, object_name]
-    result += [
-        [ *col_order_1, "Mean Correlation coeff", "%.3f" % numpy.mean(corr)],
-        [ *col_order_1, "Median Correlation coeff", "%.3f" % numpy.median(corr)],
-        [ *col_order_1, "Min Correlation coeff", "%.3f" % numpy.min(corr)],
-        [ *col_order_1, "Max Correlation coeff", "%.3f" % numpy.max(corr)],
-    ]
-    return result, corr
+    return corr
 
+#
+# Mander's Coefficient
+#
+def get_manders_coefficient(im_thr_common_pixels,thr_mask_intersection, im_thr_sum, labels, lrange):
+    M = get_sum_per_object(im_thr_common_pixels, thr_mask_intersection, labels, lrange)
+    M = M / im_thr_sum
+    return M
 
 def measure_manders_coefficient(
-        im1_thr_common_pixels: NDArray[np.float64],
-        im2_thr_common_pixels: NDArray[np.float64],
-        im1_thr_sum: np.float64,
-        im2_thr_sum: np.float64,
-        im1_name: str = IMAGE_NAME_1, 
-        im2_name: str = IMAGE_NAME_2, 
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], np.float64, np.float64]:
+    im1_pixels: NDArray[np.float64],
+    im2_pixels: NDArray[np.float64],
+    im1_thr_sum: np.float64,
+    im2_thr_sum: np.float64,
+    thr_mask_intersection: NDArray[np.bool_],
+    ) -> Tuple[np.float64, np.float64]:
 
-    result = []
+    im1_thr_common_pixels = im1_pixels[thr_mask_intersection] # fi_thresh
+    im2_thr_common_pixels = im2_pixels[thr_mask_intersection] # si_thresh
     # Manders Coefficient
     M1 = 0
     M2 = 0
     M1 = im1_thr_common_pixels.sum() / im1_thr_sum
     M2 = im2_thr_common_pixels.sum() / im2_thr_sum
 
-    result += [
-        [im1_name, im2_name, "-", "Manders Coefficient", "%.3f" % M1],
-        [im2_name, im1_name, "-", "Manders Coefficient", "%.3f" % M2],
-    ]
-    return result, M1, M2
-
-
+    return M1, M2
 
 def measure_manders_coefficient_from_objects(
+    im1_pixels: NDArray[np.float64],
+    im2_pixels: NDArray[np.float64],
+    im1_thr_sum: NDArray[np.float64],
+    im2_thr_sum: NDArray[np.float64],
+    thr_mask_intersection: NDArray[np.bool_],
     labels: NDArray[np.int32],
     lrange: np.ndarray,
-    im1_thr_common_pixels: Optional[NDArray[np.float64]] = None,
-    im2_thr_common_pixels: Optional[NDArray[np.float64]] = None,
-    im1_thr_sum: Optional[NDArray[np.float64]] = None,
-    im2_thr_sum: Optional[NDArray[np.float64]] = None,
-    thr_mask_intersection: Optional[NDArray[np.bool_]] = None,
-    im1_name: str = IMAGE_NAME_1, 
-    im2_name: str = IMAGE_NAME_2, 
-    object_name: str = OBJECT_NAME,
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
-    result = []
+    ) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+
+    # TODO: Many methods use this. Should it be cached?
+    im1_thr_common_pixels = im1_pixels[thr_mask_intersection]
+    im2_thr_common_pixels = im2_pixels[thr_mask_intersection]
     # Manders Coefficient
     M1 = numpy.zeros(len(lrange))
     M2 = numpy.zeros(len(lrange))
 
     if thr_mask_intersection is not None and numpy.any(thr_mask_intersection):
-        M1 = numpy.array(
-            scipy.ndimage.sum(im1_thr_common_pixels, labels[thr_mask_intersection], lrange)
-        ) / numpy.array(im1_thr_sum)
-        M2 = numpy.array(
-            scipy.ndimage.sum(im2_thr_common_pixels, labels[thr_mask_intersection], lrange)
-        ) / numpy.array(im2_thr_sum)
-    col_order_1 = [im1_name, im2_name, object_name]
-    result += [
-        [*col_order_1, "Mean Manders coeff", "%.3f" % numpy.mean(M1)],
-        [*col_order_1, "Median Manders coeff", "%.3f" % numpy.median(M1)],
-        [*col_order_1, "Min Manders coeff", "%.3f" % numpy.min(M1)],
-        [*col_order_1, "Max Manders coeff", "%.3f" % numpy.max(M1)],
-    ]
-    col_order_2 = [im2_name, im1_name, object_name]
-    result += [
-        [*col_order_2, "Mean Manders coeff", "%.3f" % numpy.mean(M2)],
-        [*col_order_2, "Median Manders coeff", "%.3f" % numpy.median(M2)],
-        [*col_order_2, "Min Manders coeff", "%.3f" % numpy.min(M2)],
-        [*col_order_2, "Max Manders coeff", "%.3f" % numpy.max(M2)],
-    ]
-    return result, M1, M2
+        M1 = get_manders_coefficient(im1_thr_common_pixels, thr_mask_intersection, im1_thr_sum, labels, lrange)
+        M2 = get_manders_coefficient(im2_thr_common_pixels, thr_mask_intersection, im2_thr_sum, labels, lrange)
 
+    return M1, M2
 
+#
+# Rank Weighted Coefficient
+#
 def get_image_rank(im_pixels: NDArray[np.float64], labels: Optional[NDArray[np.int32]]=None) -> NDArray[np.int32]:
     if labels is None:
         Rank = np.lexsort([im_pixels])
@@ -1130,27 +1094,28 @@ def get_image_rank(im_pixels: NDArray[np.float64], labels: Optional[NDArray[np.i
     Rank_im[Rank] = Rank_S
     return Rank_im
 
-
 def calculate_rank_weight(Rank_im1: NDArray[np.int32], Rank_im2: NDArray[np.int32]) -> NDArray[np.float64]:
     R = max(Rank_im1.max(), Rank_im2.max()) + 1
     Di = abs(Rank_im1 - Rank_im2)
     weight = ((R - Di) * 1.0) / R
     return weight
-
+    
+def get_rwc_coefficient(im1_thr_common_pixels, weight_thresh, thr_mask_intersection, im1_thr_sum,labels, lrange):
+    weighted_pixels = im1_thr_common_pixels * weight_thresh
+    RWC = get_sum_per_object(weighted_pixels, thr_mask_intersection, labels, lrange)
+    RWC = RWC / np.array(im1_thr_sum)
+    return RWC
 
 def measure_rwc_coefficient(
         im1_pixels: NDArray[np.float64], 
         im2_pixels: NDArray[np.float64],
-        im1_thr_common_pixels: NDArray[np.float64],
-        im2_thr_common_pixels: NDArray[np.float64],
         im1_thr_sum: np.float64,
         im2_thr_sum: np.float64,
-        thr_mask_intersection: NDArray[np.bool_],
-        im1_name: str = IMAGE_NAME_1, 
-        im2_name: str = IMAGE_NAME_2, 
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], np.float64, np.float64]:
+        thr_mask_intersection: NDArray[np.bool_]
+    ) -> Tuple[np.float64, np.float64]:
 
-    result = []
+    im1_thr_common_pixels = im1_pixels[thr_mask_intersection]
+    im2_thr_common_pixels = im2_pixels[thr_mask_intersection]
     # RWC Coefficient
     RWC1 = 0
     RWC2 = 0
@@ -1160,150 +1125,122 @@ def measure_rwc_coefficient(
     weight_thresh = weight[thr_mask_intersection]
     RWC1 = (im1_thr_common_pixels * weight_thresh).sum() / im1_thr_sum
     RWC2 = (im2_thr_common_pixels * weight_thresh).sum() / im2_thr_sum
-    result += [
-        [im1_name, im2_name, "-", "RWC Coefficient", "%.3f" % RWC1],
-        [im2_name, im1_name, "-", "RWC Coefficient", "%.3f" % RWC2],
-    ]
-    return result, RWC1, RWC2
-    
 
+    return RWC1, RWC2
 
 def measure_rwc_coefficient_from_objects(
     im1_pixels: NDArray[np.float64],
     im2_pixels: NDArray[np.float64],
-    labels: NDArray[np.int32],
-    lrange: np.ndarray,
-    im1_thr_common_pixels: NDArray[np.float64],
-    im2_thr_common_pixels: NDArray[np.float64],
     im1_thr_sum: NDArray[np.float64],
     im2_thr_sum: NDArray[np.float64],
     thr_mask_intersection: NDArray[np.bool_],
-    im1_name: str = IMAGE_NAME_1, 
-    im2_name: str = IMAGE_NAME_2, 
-    object_name: str = OBJECT_NAME,
-) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
-    result = []
+    labels: NDArray[np.int32],
+    lrange: np.ndarray,
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     # RWC Coefficient
     RWC1 = np.zeros(len(lrange))
     RWC2 = np.zeros(len(lrange))
+
+    im1_thr_common_pixels = im1_pixels[thr_mask_intersection]
+    im2_thr_common_pixels = im2_pixels[thr_mask_intersection]
     
     Rank_im1 = get_image_rank(im1_pixels, labels)
     Rank_im2 = get_image_rank(im2_pixels, labels)
-
     weight = calculate_rank_weight(Rank_im1, Rank_im2)
     weight_thresh = weight[thr_mask_intersection]
+
     if thr_mask_intersection is not None and np.any(thr_mask_intersection):
-        RWC1 = np.array(
-            scipy.ndimage.sum(
-                im1_thr_common_pixels * weight_thresh, labels[thr_mask_intersection], lrange
-            )
-        ) / np.array(im1_thr_sum)
-        RWC2 = np.array(
-            scipy.ndimage.sum(
-                im2_thr_common_pixels * weight_thresh, labels[thr_mask_intersection], lrange
-            )
-        ) / np.array(im2_thr_sum)
-    col_order_1 = [im1_name, im2_name, object_name]
-    result += [
-        [ *col_order_1, "Mean RWC coeff", "%.3f" % np.mean(RWC1)],
-        [ *col_order_1, "Median RWC coeff", "%.3f" % np.median(RWC1)],
-        [ *col_order_1, "Min RWC coeff", "%.3f" % np.min(RWC1)],
-        [ *col_order_1, "Max RWC coeff", "%.3f" % np.max(RWC1)]
-    ]
-    col_order_2 = [im2_name, im1_name, object_name]
-    result += [
-        [ *col_order_2, "Mean RWC coeff", "%.3f" % np.mean(RWC2)],
-        [ *col_order_2, "Median RWC coeff", "%.3f" % np.median(RWC2)],
-        [ *col_order_2, "Min RWC coeff", "%.3f" % np.min(RWC2)],
-        [ *col_order_2, "Max RWC coeff", "%.3f" % np.max(RWC2)]
-    ]
-    return result, RWC1, RWC2
+        RWC1 = get_rwc_coefficient(im1_thr_common_pixels, weight_thresh, thr_mask_intersection, im1_thr_sum, labels, lrange)
+        RWC2 = get_rwc_coefficient(im2_thr_common_pixels, weight_thresh, thr_mask_intersection, im2_thr_sum, labels, lrange)
+    
+    return RWC1, RWC2
 
-
+#
+# Overlap
+#
 def measure_overlap_coefficient(
-        fi_thresh: NDArray[np.float64],
-        si_thresh: NDArray[np.float64],
-        im1_name: str = IMAGE_NAME_1, 
-        im2_name: str = IMAGE_NAME_2, 
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], np.float64, np.float64, np.float64]:
-    result = []
+    im1_pixels: NDArray[np.float64],
+    im2_pixels: NDArray[np.float64],
+    thr_mask_intersection: NDArray[np.bool_],
+    ) -> Tuple[np.float64, np.float64, np.float64]:
+
+    im1_thr_common_pixels = im1_pixels[thr_mask_intersection]
+    im2_thr_common_pixels = im2_pixels[thr_mask_intersection]
     # Overlap Coefficient
     overlap = 0
-    overlap = (fi_thresh * si_thresh).sum() / np.sqrt(
-        (fi_thresh ** 2).sum() * (si_thresh ** 2).sum()
+    overlap = (im1_thr_common_pixels * im2_thr_common_pixels).sum() / np.sqrt(
+        (im1_thr_common_pixels ** 2).sum() * (im2_thr_common_pixels ** 2).sum()
     )
-    K1 = (fi_thresh * si_thresh).sum() / (fi_thresh ** 2).sum()
-    K2 = (fi_thresh * si_thresh).sum() / (si_thresh ** 2).sum()
-    result += [
-        [
-            im1_name,
-            im2_name,
-            "-",
-            "Overlap Coefficient",
-            "%.3f" % overlap,
-        ]
-    ]
-    return result, overlap, K1, K2
+    K1 = (im1_thr_common_pixels * im2_thr_common_pixels).sum() / (im1_thr_common_pixels ** 2).sum()
+    K2 = (im1_thr_common_pixels * im2_thr_common_pixels).sum() / (im2_thr_common_pixels ** 2).sum()
 
+    return overlap, K1, K2
 
 def measure_overlap_coefficient_from_objects(
     im1_pixels: NDArray[np.float64],
     im2_pixels: NDArray[np.float64],
+    thr_mask_intersection: NDArray[np.bool_], #TODO: this could be optional?
     labels: NDArray[np.int32],
-    lrange: np.ndarray,
-    thr_mask_intersection: Optional[NDArray[np.bool_]] = None,
-    im1_name: str = IMAGE_NAME_1, 
-    im2_name: str = IMAGE_NAME_2, 
-    object_name: str = OBJECT_NAME,
-) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    result = []
+    lrange: np.ndarray
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     # Overlap Coefficient
     if thr_mask_intersection is not None and numpy.any(thr_mask_intersection):
-        fpsq = scipy.ndimage.sum(im1_pixels[thr_mask_intersection] ** 2, labels[thr_mask_intersection], lrange)
-        spsq = scipy.ndimage.sum(im2_pixels[thr_mask_intersection] ** 2, labels[thr_mask_intersection], lrange)
-        pdt = numpy.sqrt(numpy.array(fpsq) * numpy.array(spsq))
+        im1_pixels_sq = im1_pixels[thr_mask_intersection] ** 2
+        im2_pixels_sq = im2_pixels[thr_mask_intersection] ** 2
 
-        overlap = fix(
-            scipy.ndimage.sum(
-                im1_pixels[thr_mask_intersection]
-                * im2_pixels[thr_mask_intersection],
-                labels[thr_mask_intersection],
-                lrange,
-            )
-            / pdt
-        )
-        K1 = fix(
-            (
-                scipy.ndimage.sum(
-                    im1_pixels[thr_mask_intersection]
-                    * im2_pixels[thr_mask_intersection],
-                    labels[thr_mask_intersection],
-                    lrange,
-                )
-            )
-            / (numpy.array(fpsq))
-        )
-        K2 = fix(
-            scipy.ndimage.sum(
-                im1_pixels[thr_mask_intersection]
-                * im2_pixels[thr_mask_intersection],
-                labels[thr_mask_intersection],
-                lrange,
-            )
-            / numpy.array(spsq)
-        )
+        fpsq = get_sum_per_object(im1_pixels_sq, thr_mask_intersection, labels, lrange)
+        spsq = get_sum_per_object(im2_pixels_sq, thr_mask_intersection, labels, lrange)
+        pdt = numpy.sqrt(numpy.array(fpsq) * numpy.array(spsq))
+        
+        image_pixels_product = im1_pixels[thr_mask_intersection] * im2_pixels[thr_mask_intersection]
+        sum_of_intenseties_per_object = get_sum_per_object(image_pixels_product, thr_mask_intersection, labels, lrange)
+        
+        overlap = fix(sum_of_intenseties_per_object / pdt)
+        K1 = fix(sum_of_intenseties_per_object / numpy.array(fpsq))
+        K2 = fix(sum_of_intenseties_per_object / numpy.array(spsq))
+
     else:
         overlap = K1 = K2 = numpy.zeros(len(lrange))
 
-    col_order_1 = [im1_name, im2_name, object_name]
-    result += [
-        [*col_order_1, "Mean Overlap coeff", "%.3f" % numpy.mean(overlap)],
-        [*col_order_1, "Median Overlap coeff", "%.3f" % numpy.median(overlap)],
-        [*col_order_1, "Min Overlap coeff", "%.3f" % numpy.min(overlap)],
-        [*col_order_1, "Max Overlap coeff", "%.3f" % numpy.max(overlap)],
-    ]
-    return result, overlap, K1, K2
 
+    return overlap, K1, K2
+
+#
+# Costes Thresholded Mander's Coefficient
+#
+def get_costes_thresholded_pixels_and_mask(im1_pixels, im2_pixels, im1_costes_pixels, im2_costes_pixels, im1_scale, im2_scale, costes_method):
+    # Orthogonal Regression for Costes' automated threshold
+    scale = get_scale_for_costes_threshold(im1_scale, im2_scale)
+    costes_function = {
+        CostesMethod.FASTER: bisection_costes,
+        CostesMethod.ACCURATE: linear_costes,
+        CostesMethod.FAST: linear_costes,
+    }
+    im1_costes_thr_val, im2_costes_thr_val = costes_function[costes_method](im1_costes_pixels, im2_costes_pixels, scale)
+    # Costes' thershold for entire image is applied to each object
+    im1_costes_thr_mask = im1_pixels > im1_costes_thr_val
+    im2_costes_thr_mask = im2_pixels > im2_costes_thr_val
+    combined_thresh_c = im1_costes_thr_mask & im2_costes_thr_mask
+    im1_costes_thr_common_pixels = im1_pixels[combined_thresh_c]
+    im2_costes_thr_common_pixels = im2_pixels[combined_thresh_c]
+    return im1_costes_thr_mask, im2_costes_thr_mask, combined_thresh_c, im1_costes_thr_common_pixels, im2_costes_thr_common_pixels
+
+def get_costes_threshold_pixel_sum(im_costes_thr_mask, im_pixels, labels, lrange):
+    if numpy.any(im_costes_thr_mask):
+        im_costes_thr_sum = scipy.ndimage.sum(
+            im_pixels[im_costes_thr_mask],
+            labels[im_costes_thr_mask],
+            lrange,
+        )
+    else:
+        im_costes_thr_sum = numpy.zeros(len(lrange))
+
+    return im_costes_thr_sum
+
+def get_costes_coefficient(im_costes_thr_common_pixels, combined_thresh_c, im_costes_thr_sum, labels, lrange):
+    C = get_sum_per_object(im_costes_thr_common_pixels, combined_thresh_c, labels, lrange) 
+    C = C / np.array(im_costes_thr_sum)
+    return C
 
 def measure_costes_coefficient(
         im1_pixels: NDArray[np.float64], 
@@ -1311,132 +1248,75 @@ def measure_costes_coefficient(
         im1_scale: Optional[np.float64] = None,
         im2_scale: Optional[np.float64] = None,
         costes_method: CostesMethod = CostesMethod.FAST,
-        im1_name: str = IMAGE_NAME_1, 
-        im2_name: str = IMAGE_NAME_2, 
-    ) -> Tuple[List[Tuple[str, str, str, str, str]], np.float64, np.float64]:
+    ) -> Tuple[ np.float64, np.float64]:
     #
     # Find the Costes threshold for each image
     #
-    result = []
-    # Orthogonal Regression for Costes' automated threshold
-    scale = get_scale_for_costes_threshold(im1_scale, im2_scale)
-    if costes_method == CostesMethod.FASTER:
-        thr_fi_c, thr_si_c = bisection_costes(im1_pixels, im2_pixels, scale)
-    else:
-        thr_fi_c, thr_si_c = linear_costes(im1_pixels, im2_pixels, scale)
-
-    # Costes' thershold calculation
-    fi_above_thr = im1_pixels > thr_fi_c
-    si_above_thr = im2_pixels > thr_si_c
-    combined_thresh_c = (fi_above_thr) & (si_above_thr)
-    fi_thresh_c = im1_pixels[combined_thresh_c]
-    si_thresh_c = im2_pixels[combined_thresh_c]
-    tot_fi_thr_c = im1_pixels[(fi_above_thr)].sum()
-    tot_si_thr_c = im2_pixels[(si_above_thr)].sum()
+    (
+        im1_costes_thr_mask, 
+        im2_costes_thr_mask,
+        combined_thresh_c, 
+        im1_costes_thr_common_pixels, 
+        im2_costes_thr_common_pixels  
+    ) = get_costes_thresholded_pixels_and_mask(
+        im1_pixels, 
+        im2_pixels, 
+        im1_pixels, 
+        im2_pixels, 
+        im1_scale, 
+        im2_scale, 
+        costes_method
+    )
+    im1_costes_thr_sum = im1_pixels[(im1_costes_thr_mask)].sum()
+    im2_costes_thr_sum = im2_pixels[(im2_costes_thr_mask)].sum()
 
     # Costes' Automated Threshold
     C1 = 0
     C2 = 0
-    C1 = fi_thresh_c.sum() / tot_fi_thr_c
-    C2 = si_thresh_c.sum() / tot_si_thr_c
+    C1 = im1_costes_thr_common_pixels.sum() / im1_costes_thr_sum
+    C2 = im2_costes_thr_common_pixels.sum() / im2_costes_thr_sum
 
-    result += [
-        [
-            im1_name,
-            im2_name,
-            "-",
-            "Manders Coefficient (Costes)",
-            "%.3f" % C1,
-        ],
-        [
-            im2_name,
-            im1_name,
-            "-",
-            "Manders Coefficient (Costes)",
-            "%.3f" % C2,
-        ],
-    ]
-    return result, C1, C2
 
+    return C1, C2
 
 def measure_costes_coefficient_from_objects(
     im1_pixels: NDArray[np.float64],
     im2_pixels: NDArray[np.float64],
-    labels: NDArray[np.int32],
-    lrange: np.ndarray,
     im1_costes_pixels: NDArray[numpy.float64],
     im2_costes_pixels: NDArray[numpy.float64],
+    labels: NDArray[np.int32],
+    lrange: np.ndarray,
     im1_scale,
     im2_scale,
     costes_method: CostesMethod = CostesMethod.FAST,
-    im1_name: str = IMAGE_NAME_1, 
-    im2_name: str = IMAGE_NAME_2, 
-    object_name: str = OBJECT_NAME,
-) -> Tuple[List[Tuple[str, str, str, str, str]], NDArray[np.float64], NDArray[np.float64]]:
-    # first_pixels and second_pixels are obtained from the objects 
-    result = []
-    # Orthogonal Regression for Costes' automated threshold
-    scale = get_scale_for_costes_threshold(im1_scale, im2_scale)
-
-    if costes_method == CostesMethod.FASTER:
-        thr_fi_c, thr_si_c = bisection_costes(im1_costes_pixels, im2_costes_pixels, scale)
-    else:
-        thr_fi_c, thr_si_c = linear_costes(im1_costes_pixels, im2_costes_pixels, scale)
-
-    # Costes' thershold for entire image is applied to each object
-    fi_above_thr = im1_pixels > thr_fi_c
-    si_above_thr = im2_pixels > thr_si_c
-    combined_thresh_c = fi_above_thr & si_above_thr
-    fi_thresh_c = im1_pixels[combined_thresh_c]
-    si_thresh_c = im2_pixels[combined_thresh_c]
-    if numpy.any(fi_above_thr):
-        tot_fi_thr_c = scipy.ndimage.sum(
-            im1_pixels[im1_pixels >= thr_fi_c],
-            labels[im1_pixels >= thr_fi_c],
-            lrange,
-        )
-    else:
-        tot_fi_thr_c = numpy.zeros(len(lrange))
-    if numpy.any(si_above_thr):
-        tot_si_thr_c = scipy.ndimage.sum(
-            im2_pixels[im2_pixels >= thr_si_c],
-            labels[im2_pixels >= thr_si_c],
-            lrange,
-        )
-    else:
-        tot_si_thr_c = numpy.zeros(len(lrange))
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    (
+        im1_costes_thr_mask, 
+        im2_costes_thr_mask, 
+        combined_thresh_c, 
+        im1_costes_thr_common_pixels, 
+        im2_costes_thr_common_pixels 
+    ) = get_costes_thresholded_pixels_and_mask (
+        im1_pixels, 
+        im2_pixels, 
+        im1_costes_pixels, 
+        im2_costes_pixels, 
+        im1_scale, 
+        im2_scale, 
+        costes_method
+    )
+    im1_costes_thr_sum = get_costes_threshold_pixel_sum(im1_costes_thr_mask, im1_pixels, labels, lrange)
+    im2_costes_thr_sum = get_costes_threshold_pixel_sum(im2_costes_thr_mask, im2_pixels, labels, lrange)
 
     # Costes Automated Threshold
     C1 = numpy.zeros(len(lrange))
     C2 = numpy.zeros(len(lrange))
     if numpy.any(combined_thresh_c):
-        C1 = numpy.array(
-            scipy.ndimage.sum(
-                fi_thresh_c, labels[combined_thresh_c], lrange
-            )
-        ) / numpy.array(tot_fi_thr_c)
-        C2 = numpy.array(
-            scipy.ndimage.sum(
-                si_thresh_c, labels[combined_thresh_c], lrange
-            )
-        ) / numpy.array(tot_si_thr_c)
-    col_order_1 = [im1_name, im2_name, object_name]
-    result += [
-        [*col_order_1, "Mean Manders coeff (Costes)", "%.3f" % numpy.mean(C1)],
-        [*col_order_1, "Median Manders coeff (Costes)", "%.3f" % numpy.median(C1)],
-        [*col_order_1, "Min Manders coeff (Costes)", "%.3f" % numpy.min(C1)],
-        [*col_order_1, "Max Manders coeff (Costes)", "%.3f" % numpy.max(C1)],
-    ]
-    col_order_2 = [im2_name, im1_name, object_name]
-    result += [
-        [*col_order_2, "Mean Manders coeff (Costes)", "%.3f" % numpy.mean(C2)],
-        [*col_order_2, "Median Manders coeff (Costes)", "%.3f" % numpy.median(C2)],
-        [*col_order_2, "Min Manders coeff (Costes)", "%.3f" % numpy.min(C2)],
-        [*col_order_2, "Max Manders coeff (Costes)", "%.3f" % numpy.max(C2)],
-    ]
+        C1 = get_costes_coefficient(im1_costes_thr_common_pixels, combined_thresh_c, im1_costes_thr_sum, labels, lrange)
+        C2 = get_costes_coefficient(im2_costes_thr_common_pixels, combined_thresh_c, im2_costes_thr_sum, labels, lrange)
 
-    return result, C1, C2
 
+    return C1, C2
 
 def get_scale_for_costes_threshold(scale_1, scale_2) -> np.float64:
     if scale_1 is not None and scale_2 is not None:
@@ -1447,7 +1327,6 @@ def get_scale_for_costes_threshold(scale_1, scale_2) -> np.float64:
         return scale_2
     else:
         return np.float64(255)
-
 
 def bisection_costes(
         im1_costes_pixels: NDArray[np.float64], 
@@ -1518,7 +1397,6 @@ def bisection_costes(
     thr_si_c = (a * thr_fi_c) + b
 
     return thr_fi_c, thr_si_c
-
 
 def linear_costes(
         im1_costes_pixels: NDArray[np.float64], 
