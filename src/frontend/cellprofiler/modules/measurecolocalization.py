@@ -627,7 +627,7 @@ You can set a different threshold for each image selected in the module.
         return im1_pixel_data, im2_pixel_data, mask, im1_thr_percentage, im2_thr_percentage
 
     def prepare_images_objects(self, workspace, first_image_name, second_image_name, object_name):
-        im1 = workspace.image_set.get_image(first_image_name, must_be_grayscale=True)
+        im1= workspace.image_set.get_image(first_image_name, must_be_grayscale=True) # NDArray[np.float32]
         im2 = workspace.image_set.get_image(second_image_name, must_be_grayscale=True)
         objects = workspace.object_set.get_objects(object_name)
         labels = objects.segmented
@@ -754,8 +754,8 @@ You can set a different threshold for each image selected in the module.
                     # Run colocalization measurements on the objects
                     #
                     colocalization_measurements, measurements_summary = run_image_pair_objects(
-                        first_pixels, 
-                        second_pixels, 
+                        first_pixels.astype(numpy.float32), 
+                        second_pixels.astype(numpy.float32), 
                         labels, 
                         object_count, 
                         im1_name, 

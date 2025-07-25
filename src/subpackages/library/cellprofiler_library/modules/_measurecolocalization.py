@@ -22,8 +22,8 @@ def run_image_pair_images(
     im1_name:           Annotated[str, Field(description="First image name")] = "Name of the first image. This will be used to name the measurement columns",
     im2_name:           Annotated[str, Field(description="Second image name")] = "Name of the second image. This will be used to name the measurement columns",
     mask:               Annotated[Optional[ImageGrayscaleMask], Field(description="Mask of the pixels to be used for the measurements")] = None, 
-    im1_thr_percentage: Annotated[np.float64, Field(description="Threshold value for the first image"), BeforeValidator(np.float64)]=np.float64(100), 
-    im2_thr_percentage: Annotated[np.float64, Field(description="Threshold value for the second image"), BeforeValidator(np.float64)]=np.float64(100), 
+    im1_thr_percentage: Annotated[float, Field(description="Threshold value for the first image"), BeforeValidator(np.float64)]=100, 
+    im2_thr_percentage: Annotated[float, Field(description="Threshold value for the second image"), BeforeValidator(np.float64)]=100, 
     measurement_types:  Annotated[List[MeasurementType], Field(description="List of measurement types to be calculated")] = [MeasurementType.CORRELATION, MeasurementType.MANDERS, MeasurementType.RWC, MeasurementType.OVERLAP, MeasurementType.COSTES],
     **kwargs
     ) -> Annotated[
@@ -59,7 +59,6 @@ def run_image_pair_images(
             ]
 
         if set(measurement_types).intersection({MeasurementType.MANDERS, MeasurementType.RWC, MeasurementType.OVERLAP, MeasurementType.COSTES}) != set():
-            # Get channel-specific thresholds from thresholds array
             # Threshold as percentage of maximum intensity in each channel
             im1_thr_sum, im2_thr_sum, thr_mask_intersection = get_thresholded_images_and_counts(im1_pixels, im2_pixels, im1_thr_percentage, im2_thr_percentage)
             # take the first element as only a single value is expected for whole image threshold sum
@@ -152,19 +151,19 @@ def get_object_result_array(col_order_list, measurement_name, measurement_array)
 
 @validate_call(config=ConfigDict(arbitrary_types_allowed=True))
 def run_image_pair_objects(
-    im1_pixels:         Annotated[NDArray[np.float64], Field(description="First image pixels")],
-    im2_pixels:         Annotated[NDArray[np.float64], Field(description="Second image pixels")],
+    im1_pixels:         Annotated[NDArray[np.float32], Field(description="First image pixels")],
+    im2_pixels:         Annotated[NDArray[np.float32], Field(description="Second image pixels")],
     labels:             Annotated[NDArray[np.int32], Field(description="Labels")],
     object_count:       Annotated[int, Field(description="Object count")],
     im1_name:           Annotated[str, Field(description="First image name")] = "First image",
     im2_name:           Annotated[str, Field(description="Second image name")] = "Second image",
     object_name:        Annotated[str, Field(description="Object name")] = "Objects",
     mask:               Annotated[Optional[ImageGrayscaleMask], Field(description="Mask")] = None, 
-    im1_thr_percentage: Annotated[np.float64, Field(description="First image threshold value"), BeforeValidator(np.float64)]=np.float64(100), 
-    im2_thr_percentage: Annotated[np.float64, Field(description="Second image threshold value"), BeforeValidator(np.float64)]=np.float64(100), 
-    im1_costes_pixels:  Annotated[Optional[NDArray[np.float64]], Field(description="First image pixel data for costes")]=None,
-    im2_costes_pixels:  Annotated[Optional[NDArray[np.float64]], Field(description="Second image pixel data for costes")]=None,
-    measurement_types:  Annotated[List[MeasurementType], Field(description="List of measurement types to be calculated")] = [MeasurementType.CORRELATION, MeasurementType.MANDERS, MeasurementType.RWC, MeasurementType.OVERLAP, MeasurementType.COSTES],
+    im1_thr_percentage: Annotated[float, Field(description="First image threshold value"), BeforeValidator(np.float64)]=100, 
+    im2_thr_percentage: Annotated[float, Field(description="Second image threshold value"), BeforeValidator(np.float64)]=100, 
+    im1_costes_pixels:  Annotated[Optional[NDArray[np.float32]], Field(description="First image pixel data for costes")]=None,
+    im2_costes_pixels:  Annotated[Optional[NDArray[np.float32]], Field(description="Second image pixel data for costes")]=None,
+    measurement_types:  Annotated[List[MeasurementType], Field(description="List of measurement types to be calculated")]=[MeasurementType.CORRELATION, MeasurementType.MANDERS, MeasurementType.RWC, MeasurementType.OVERLAP, MeasurementType.COSTES],
     **kwargs
     ) -> Tuple[
         Dict[str, NDArray[np.float64]],
