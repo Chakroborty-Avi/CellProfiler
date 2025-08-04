@@ -40,9 +40,6 @@ from cellprofiler_core.setting.text import ImageName
 from cellprofiler_library.opts.correctilluminationapply import Method
 from cellprofiler_library.modules._correctilluminationapply import correct_illumination_apply
 
-DOS_DIVIDE = Method.DIVIDE
-DOS_SUBTRACT = Method.SUBTRACT
-
 ######################################
 #
 # Rescaling choices - deprecated
@@ -59,7 +56,6 @@ RE_MATCH = "Match maximums"
 ######################################
 
 SETTINGS_PER_IMAGE = 4
-
 
 class CorrectIlluminationApply(Module):
     category = "Image Processing"
@@ -118,22 +114,22 @@ a future version of CellProfiler. You can export .mat format images as
 
         divide_or_subtract = Choice(
             "Select how the illumination function is applied",
-            [DOS_DIVIDE, DOS_SUBTRACT],
-            doc="""\
+            [Method.DIVIDE.value, Method.SUBTRACT.value],
+            doc=f"""\
 This choice depends on how the illumination function was calculated and
 on your physical model of the way illumination variation affects the
 background of images relative to the objects in images; it is also
 somewhat empirical.
 
--  *%(DOS_SUBTRACT)s:* Use this option if the background signal is
+-  *{Method.SUBTRACT.value}:* Use this option if the background signal is
    significant relative to the real signal coming from the cells. If you
    created the illumination correction function using
    *Background*, then you will want to choose
-   *%(DOS_SUBTRACT)s* here.
--  *%(DOS_DIVIDE)s:* Choose this option if the signal to background
+   *{Method.SUBTRACT.value}* here.
+-  *{Method.DIVIDE.value}:* Choose this option if the signal to background
    ratio is high (the cells are stained very strongly). If you created
    the illumination correction function using *Regular*, then
-   you will want to choose *%(DOS_DIVIDE)s* here.
+   you will want to choose *{Method.DIVIDE.value}* here.
 """
             % globals(),
         )
