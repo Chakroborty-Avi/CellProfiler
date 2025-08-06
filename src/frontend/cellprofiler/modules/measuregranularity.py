@@ -272,6 +272,19 @@ class MeasureGranularity(Module):
             title="If individual objects were measured, use an Export module to view their results",
         )
 
+    def add_names_to_measurements(self, measurements_arr, image_measurements_arr, statistics, image_name, granular_spectrum_length):
+        _statistics = [image_name] + statistics
+        _measurements_arr = []
+        _image_measurements_arr = []
+        ng = granular_spectrum_length
+        for i in range(1, ng+1):
+            feature = C_GRANULARITY % (i, image_name)
+            _image_measurements_arr += [(feature, image_measurements_arr[i-1])]
+            if i < len(measurements_arr):
+                if measurements_arr[i]:
+                    _measurements_arr += [(measurements_arr[i-1][0], feature, measurements_arr[i-1][1])]
+        return _measurements_arr, _image_measurements_arr, _statistics
+
     def run_on_image_setting(self, workspace, image_name):
         im = workspace.image_set.get_image(image_name, must_be_grayscale=True)
         im_pixel_data = im.pixel_data
@@ -286,6 +299,9 @@ class MeasureGranularity(Module):
         image_name = image_name
         dimensions = im.dimensions
         measurements_arr, image_measurements_arr, statistics = measure_granularity(im_pixel_data, im_mask, subsample_size, image_sample_size, element_size, object_records, granular_spectrum_length, image_name, dimensions)
+        
+        measurements_arr, image_measurements_arr, statistics = self.add_names_to_measurements(measurements_arr, image_measurements_arr, statistics, image_name, granular_spectrum_length)
+
         for packed_measurements in measurements_arr:
             workspace.measurements.add_measurement(*packed_measurements)
         for packed_measurements in image_measurements_arr:
