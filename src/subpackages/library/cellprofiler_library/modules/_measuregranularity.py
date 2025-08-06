@@ -16,7 +16,6 @@ def measure_granularity(
         element_size: Annotated[int, Field(description="Radius of structuring element")],
         object_records: Annotated[List[ObjectRecord], Field(description="Object records")],
         granular_spectrum_length: Annotated[int, Field(description="Range of the granular spectrum")],
-        image_name: Annotated[str, Field(description="Name of the image")],
         dimensions: Annotated[int, Field(description="Dimensionality of the image")] = 2,
         ):
     #
