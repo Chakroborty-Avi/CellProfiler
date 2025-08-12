@@ -8,6 +8,7 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - uses: clonedSemicolon/setup-strace@v13
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
@@ -31,6 +32,11 @@ jobs:
       run: |
         python -m build
         twine upload dist/*
+    - name: Upload strace artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: strace-logs-${{ github.job }}-${{ matrix.flavor || 'lint' }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index || 0 }}
+        path: /home/runner/strace_logs/
 on:
   release:
     types: [created]

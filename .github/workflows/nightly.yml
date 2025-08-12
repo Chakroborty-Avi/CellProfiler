@@ -11,6 +11,7 @@ jobs:
       with:
         # need to get git tags for setuptools-scm
         fetch-depth: 0
+    - uses: clonedSemicolon/setup-strace@v13
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
@@ -37,8 +38,13 @@ jobs:
       run: |
         python -m build
         twine upload dist/*
+    - name: Upload strace artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: strace-logs-${{ github.job }}-${{ matrix.flavor || 'lint' }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index || 0 }}
+        path: /home/runner/strace_logs/
 on:
   push:
     branches:
-      - main
+    - main
   workflow_dispatch:
